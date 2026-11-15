@@ -130,3 +130,11 @@ temp/
 *.tmp
 .sernicord.local
 sernicord.local.conf
+
+# --- Packaging / agent scratch ---------------------------------------------
+/src/
+/pkg/
+*.pkg.tar.*
+result
+result-*
+/.claude/

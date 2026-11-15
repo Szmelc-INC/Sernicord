@@ -1,8 +1,28 @@
 # Sernicord ~ A Better Vencord+ for devs & serniks
 
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Arch PKGBUILD](https://img.shields.io/badge/Arch-PKGBUILD-1793d1?logo=archlinux&logoColor=white)](PKGBUILD)
+[![Nix flake](https://img.shields.io/badge/Nix-flake-5277c3?logo=nixos&logoColor=white)](flake.nix)
+[![Vencord](https://img.shields.io/badge/target-Vencord%20%7C%20Equicord-ff69b4)](https://github.com/Vendicated/Vencord)
+
 Isolated Discord mod workspace with a universal sideloader. Default mode builds **Vencord (dev)** with every plugin under `plugins/`, injects into a **local** Discord profile, watches for changes, and launches.
 
 System Discord and `~/.config/discord` stay untouched unless you deliberately pass `--system` (and confirm).
+
+## Install
+
+```sh
+# Arch (from the repo checkout)
+makepkg -si
+
+# Nix
+nix run github:Szmelc-INC/Sernicord
+nix profile install github:Szmelc-INC/Sernicord
+```
+
+Packaged installs keep the code read-only under `/usr/share/sernicord` (or the Nix store) and run from a
+writable workspace at `${SERNICORD_HOME:-~/.local/share/sernicord}`, synced on every start. Shell completion
+for bash, zsh and fish is installed automatically; `sernicord completion <bash|zsh|fish>` prints it.
 
 ## Quick start
 
