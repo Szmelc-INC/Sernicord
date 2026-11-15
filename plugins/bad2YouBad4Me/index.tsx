@@ -10,6 +10,7 @@ import { Button } from "@components/Button";
 import { HeadingTertiary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
+import { saveFile } from "@utils/web";
 import {
     ChannelStore,
     GuildStore,
@@ -22,6 +23,7 @@ import {
     UserStore,
     useState
 } from "@webpack/common";
+import { strToU8, zipSync } from "fflate";
 
 import { LlmConfig, rewrite, Verdict } from "./llm";
 
@@ -30,25 +32,14 @@ const UNDO_CAP = 5000;
 const EDITABLE_TYPES = new Set([0, 19]);
 
 const DEFAULT_KEYWORDS = `# from => to   (case-insensitive, whole words, one rule per line, # = comment)
-fuck => frick
-fucking => flipping
-shit => shoot
-bullshit => nonsense
-asshole => rascal
-bitch => menace
-wtf => what on earth
-kys => go touch grass
-kurwa => kurczę
-kurwy => kurczaki
-chuj => chomik
-huj => chomik
-jebać => olać
-jebany => przeklęty
-pierdolę => pieprzę
-pierdolony => pierniczony
-spierdalaj => zjeżdżaj
-zajebiste => zarąbiste
-cholera => kurczę pieczone`;
+# Empty by default — swearing is fine. Add only words you really want swapped, e.g.:
+# someword => otherword`;
+
+const DEFAULT_PURGE = `# One keyword per line, case-insensitive, whole words. # = comment.
+# word*  = prefix match (word, words, wordsmith...)
+# re:... = raw regex (JS syntax, flags "iu")`;
+
+const DEFAULT_REPLACEMENT = "🔒 This content is available only for Discord Nitro+ Super Premium. Buy Nitro+ to view this post (i)";
 
 type Scope = "channel" | "guild" | "dms" | "everywhere";
 type UndoEntry = { c: string; m: string; old: string; at: number; };
@@ -58,17 +49,18 @@ export const settings = definePluginSettings({
         type: OptionType.COMPONENT,
         component: () => (
             <Paragraph>
-                Tolerator-T1000 — Laundry day. Softens <b>your own</b> messages: a keyword pass before sending,
-                an optional LLM wordsmith that turns crude into dry dark satire, and bulk cleanup of your history.
-                The LLM refuses (verdict "flag") threats, slurs, harassment of a specific person and illegal content —
-                those are left untouched and reported to you instead of being disguised.
+                Tolerator-T1000 — Laundry day. Works on <b>your own</b> messages: optional keyword swaps,
+                an LLM wordsmith that turns cheap stereotype jokes into proper dark comedy, and bulk laundry of your history —
+                rewrite, purge (delete) by keyword list, or swap matches for one fixed text. The LLM never disguises threats,
+                slurs, harassment of a specific person or illegal content (verdict "flag"); what happens to flagged
+                messages is your call below. Optional ZIP backup of every original before it is edited or deleted.
             </Paragraph>
         )
     },
     liveKeywords: {
         type: OptionType.BOOLEAN,
         description: "Live: apply keyword rules to messages before they are sent (and on edit)",
-        default: true
+        default: false
     },
     liveLlm: {
         type: OptionType.SELECT,
@@ -138,9 +130,48 @@ export const settings = definePluginSettings({
         description: "LLM request timeout in seconds",
         default: 30
     },
+    bulkAction: {
+        type: OptionType.SELECT,
+        description: "Laundry day: what to do",
+        options: [
+            { label: "Rewrite (keyword swaps + optional LLM)", value: "polish", default: true },
+            { label: "Purge — delete messages matching the purge list", value: "purge" },
+            { label: "Replace — edit messages matching the purge list to the fixed text", value: "replace" }
+        ]
+    },
+    purgeKeywords: {
+        type: OptionType.STRING,
+        description: "Purge / replace list: a message matching any line is hit",
+        default: DEFAULT_PURGE,
+        multiline: true
+    },
+    replacementText: {
+        type: OptionType.STRING,
+        description: "Fixed text used by Replace mode and by the \"replace\" flagged action",
+        default: DEFAULT_REPLACEMENT
+    },
+    flaggedAction: {
+        type: OptionType.SELECT,
+        description: "Laundry day with LLM: what to do with messages the model flags",
+        options: [
+            { label: "Leave untouched, just count", value: "leave", default: true },
+            { label: "Replace with the fixed text", value: "replace" },
+            { label: "Delete", value: "delete" }
+        ]
+    },
+    bulkOlderThanDays: {
+        type: OptionType.NUMBER,
+        description: "Laundry day: only messages OLDER than N days (0 = no limit)",
+        default: 0
+    },
+    backupZip: {
+        type: OptionType.BOOLEAN,
+        description: "Laundry day: save a ZIP with the original content of everything edited or deleted (also in dry run, as a preview)",
+        default: true
+    },
     bulkUseLlm: {
         type: OptionType.BOOLEAN,
-        description: "Laundry day: also run the LLM (otherwise keywords only)",
+        description: "Laundry day: also run the LLM (rewrite in Rewrite mode, flag detection in every mode)",
         default: false
     },
     bulkDryRun: {
@@ -150,7 +181,7 @@ export const settings = definePluginSettings({
     },
     bulkSinceDays: {
         type: OptionType.NUMBER,
-        description: "Laundry day: only messages from the last N days (0 = all time)",
+        description: "Laundry day: only messages NEWER than N days (0 = no limit)",
         default: 0
     },
     bulkDelayMs: {
@@ -209,6 +240,39 @@ export function applyKeywords(text: string): string {
         for (const r of rs) part = part.replace(r.re, m => matchCase(m, r.to));
         return part;
     }).join("");
+}
+
+/* ---------- purge list ---------- */
+
+type PurgeRule = { re: RegExp; label: string; };
+let purgeSource = "";
+let purgeRules: PurgeRule[] = [];
+
+function getPurgeRules(): PurgeRule[] {
+    const src = settings.store.purgeKeywords ?? "";
+    if (src === purgeSource) return purgeRules;
+    purgeSource = src;
+    purgeRules = src.split("\n")
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith("#"))
+        .flatMap(l => {
+            try {
+                if (l.startsWith("re:")) return [{ re: new RegExp(l.slice(3), "iu"), label: l }];
+                const prefix = l.endsWith("*");
+                const word = escapeRe(prefix ? l.slice(0, -1) : l);
+                const tail = prefix ? "" : "(?![\\p{L}\\p{N}_])";
+                return [{ re: new RegExp(`(?<![\\p{L}\\p{N}_])${word}${tail}`, "iu"), label: l }];
+            } catch {
+                // Invalid user regex: skip the line instead of breaking the whole list.
+                return [];
+            }
+        });
+    return purgeRules;
+}
+
+function purgeHit(text: string): string | null {
+    for (const r of getPurgeRules()) if (r.re.test(text)) return `keyword: ${r.label}`;
+    return null;
 }
 
 /* ---------- LLM pass ---------- */
@@ -324,8 +388,8 @@ function targetsFor(scope: Scope): Target[] {
 }
 
 // Discord search returns 25 hits per page; page backwards with max_id so the 10k offset cap never bites.
-async function* searchOwnMessages(t: Target, authorId: string, minId?: string) {
-    let maxId: string | undefined;
+async function* searchOwnMessages(t: Target, authorId: string, minId?: string, olderThanId?: string) {
+    let maxId = olderThanId;
     const seen = new Set<string>();
     const base = t.kind === "guild" ? `/guilds/${t.id}/messages/search` : `/channels/${t.id}/messages/search`;
     while (!job.abort) {
@@ -350,17 +414,82 @@ async function* searchOwnMessages(t: Target, authorId: string, minId?: string) {
     }
 }
 
+type BackupEntry = {
+    action: "edit" | "delete";
+    reason: string;
+    guild_id?: string;
+    channel_id: string;
+    message_id: string;
+    sent_at: string;
+    original: string;
+    new?: string;
+};
+
+function saveBackup(entries: BackupEntry[], scope: Scope, dry: boolean) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const txt = entries.map(e =>
+        `[${e.sent_at}] ${e.action.toUpperCase()} (${e.reason}) channel ${e.channel_id} message ${e.message_id}\n` +
+        `--- original ---\n${e.original}\n` +
+        (e.new != null ? `--- new ---\n${e.new}\n` : "")
+    ).join("\n");
+    const zip = zipSync({
+        "messages.json": strToU8(JSON.stringify(entries, null, 2)),
+        "messages.txt": strToU8(txt)
+    });
+    saveFile(new File([zip], `laundry-${scope}${dry ? "-dryrun" : ""}-${stamp}.zip`, { type: "application/zip" }));
+}
+
+async function deleteMessage(channelId: string, messageId: string) {
+    await withRetry(() => RestAPI.del({ url: `/channels/${channelId}/messages/${messageId}` }));
+}
+
+type Plan = { action: "edit"; text: string; reason: string; } | { action: "delete"; reason: string; } | null;
+
+async function planFor(content: string, s: typeof settings.store): Promise<{ plan: Plan; flagged: boolean; }> {
+    if (s.bulkAction === "polish") {
+        const res = await polish(content, s.bulkUseLlm);
+        if (res.verdict?.verdict === "flag") {
+            const reason = `flagged: ${res.verdict.reason}`;
+            if (s.flaggedAction === "delete") return { plan: { action: "delete", reason }, flagged: true };
+            if (s.flaggedAction === "replace") return { plan: { action: "edit", text: s.replacementText, reason }, flagged: true };
+            return { plan: null, flagged: true };
+        }
+        return { plan: res.text === content ? null : { action: "edit", text: res.text, reason: res.verdict ? "llm rewrite" : "keywords" }, flagged: false };
+    }
+
+    let reason = purgeHit(content);
+    let flagged = false;
+    if (!reason && s.bulkUseLlm && content.trim()) {
+        const v = await rewrite(llmConfig(), content);
+        if (v.verdict === "flag") {
+            flagged = true;
+            reason = `flagged: ${v.reason}`;
+        }
+    }
+    if (!reason) return { plan: null, flagged };
+    return {
+        plan: s.bulkAction === "purge" ? { action: "delete", reason } : { action: "edit", text: s.replacementText, reason },
+        flagged
+    };
+}
+
 async function laundry(scope: Scope) {
     if (job.running) return toast("Laundry already running");
     const s = settings.store;
     const me = UserStore.getCurrentUser()?.id;
     const targets = targetsFor(scope);
     if (!me || !targets.length) return toast("Nothing to wash here", "critical");
+    if (s.bulkAction !== "polish" && !getPurgeRules().length && !s.bulkUseLlm)
+        return toast("Purge list is empty and LLM is off — nothing would match", "critical");
 
-    const minId = s.bulkSinceDays > 0 ? SnowflakeUtils.fromTimestamp(Date.now() - s.bulkSinceDays * 86_400_000) : undefined;
+    const day = 86_400_000;
+    const minId = s.bulkSinceDays > 0 ? SnowflakeUtils.fromTimestamp(Date.now() - s.bulkSinceDays * day) : undefined;
+    const maxId = s.bulkOlderThanDays > 0 ? SnowflakeUtils.fromTimestamp(Date.now() - s.bulkOlderThanDays * day) : undefined;
     const dry = s.bulkDryRun;
-    let scanned = 0, changed = 0, flagged = 0, failed = 0;
+    const verb = dry ? "would hit" : "hit";
+    let scanned = 0, edited = 0, deleted = 0, flagged = 0, failed = 0;
     const undo: UndoEntry[] = [];
+    const backup: BackupEntry[] = [];
 
     job.running = true;
     job.abort = false;
@@ -368,30 +497,55 @@ async function laundry(scope: Scope) {
         for (const [i, t] of targets.entries()) {
             if (job.abort) break;
             try {
-                for await (const m of searchOwnMessages(t, me, minId)) {
+                for await (const m of searchOwnMessages(t, me, minId, maxId)) {
                     if (job.abort) break;
                     scanned++;
-                    if (m.author?.id !== me || !EDITABLE_TYPES.has(m.type) || !m.content) continue;
-                    let res: Awaited<ReturnType<typeof polish>>;
+                    if (m.author?.id !== me || !EDITABLE_TYPES.has(m.type)) continue;
+                    if (!m.content) continue;
+
+                    let plan: Plan;
                     try {
-                        res = await polish(m.content, s.bulkUseLlm);
+                        const r = await planFor(m.content, s);
+                        plan = r.plan;
+                        if (r.flagged) flagged++;
                     } catch {
                         failed++;
                         continue;
                     }
-                    if (res.verdict?.verdict === "flag") flagged++;
-                    if (res.text === m.content) continue;
-                    changed++;
-                    if (!dry) {
+                    if (!plan || (plan.action === "edit" && plan.text === m.content)) continue;
+
+                    const entry: BackupEntry = {
+                        action: plan.action,
+                        reason: plan.reason,
+                        guild_id: m.guild_id ?? (t.kind === "guild" ? t.id : undefined),
+                        channel_id: m.channel_id,
+                        message_id: m.id,
+                        sent_at: m.timestamp,
+                        original: m.content,
+                        new: plan.action === "edit" ? plan.text : undefined
+                    };
+
+                    if (dry) {
+                        if (plan.action === "edit") edited++;
+                        else deleted++;
+                        backup.push(entry);
+                    } else {
                         try {
-                            await editMessage(m.channel_id, m.id, res.text);
-                            undo.push({ c: m.channel_id, m: m.id, old: m.content, at: Date.now() });
+                            if (plan.action === "edit") {
+                                await editMessage(m.channel_id, m.id, plan.text);
+                                undo.push({ c: m.channel_id, m: m.id, old: m.content, at: Date.now() });
+                                edited++;
+                            } else {
+                                await deleteMessage(m.channel_id, m.id);
+                                deleted++;
+                            }
+                            backup.push(entry);
                             await sleep(Math.max(500, s.bulkDelayMs));
                         } catch {
                             failed++;
                         }
                     }
-                    setStatus(`[${i + 1}/${targets.length}] ${t.label}: scanned ${scanned}, ${dry ? "would change" : "changed"} ${changed}, flagged ${flagged}, failed ${failed}`);
+                    setStatus(`[${i + 1}/${targets.length}] ${t.label}: scanned ${scanned}, ${verb}: edit ${edited} / delete ${deleted}, flagged ${flagged}, failed ${failed}`);
                 }
             } catch (e: any) {
                 failed++;
@@ -400,8 +554,15 @@ async function laundry(scope: Scope) {
         }
     } finally {
         await pushUndo(undo);
+        if (s.backupZip && backup.length) {
+            try {
+                saveBackup(backup, scope, dry);
+            } catch (e: any) {
+                toast(`Backup ZIP failed — ${e?.message ?? e}`, "critical");
+            }
+        }
         job.running = false;
-        const summary = `${job.abort ? "Stopped" : "Done"}${dry ? " (dry run)" : ""}: scanned ${scanned}, ${dry ? "would change" : "changed"} ${changed}, flagged ${flagged}, failed ${failed}`;
+        const summary = `${job.abort ? "Stopped" : "Done"}${dry ? " (dry run)" : ""}: scanned ${scanned}, ${verb}: edit ${edited} / delete ${deleted}, flagged ${flagged}, failed ${failed}`;
         setStatus(summary);
         toast(`Laundry day — ${summary}`);
     }
