@@ -121,6 +121,8 @@ ${BLD}Commands:${RST}
   stop                 Stop watch + this profile's Discord
   profiles             List local profiles
   clean-build          Remove target dist/ (keeps sources)
+  completion SHELL     Print shell completion: bash | zsh | fish
+  version              Print version
   help                 This help
 
 ${BLD}Options:${RST}
@@ -152,6 +154,7 @@ EOF
 # Arg parsing
 # ---------------------------------------------------------------------------
 CMD=""
+CMD_ARG=""
 TARGET="$DEFAULT_TARGET"
 PROFILE="$DEFAULT_PROFILE"
 CHANNEL="$DEFAULT_CHANNEL"
@@ -166,6 +169,7 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help|help) CMD=help; shift ;;
+      -V|--version) CMD=version; shift ;;
       --target) TARGET="${2:-}"; shift 2 ;;
       --profile) PROFILE="${2:-}"; shift 2 ;;
       --channel) CHANNEL="${2:-}"; shift 2 ;;
@@ -186,6 +190,7 @@ parse_args() {
     CMD="${CMD:-dev}"
   else
     CMD="${positional[0]}"
+    CMD_ARG="${positional[1]:-}"
     # allow: ./sernicord build --prod already handled; leftover positionals ignored
   fi
   case "$TARGET" in
@@ -780,11 +785,27 @@ EOF
   done
 }
 
+cmd_completion() {
+  local shell="$1" dir
+  # Installed layout ships completions next to the script; packaged wrappers set SERNICORD_COMPLETIONS.
+  dir="${SERNICORD_COMPLETIONS:-$ROOT/completions}"
+  case "$shell" in
+    bash) cat "$dir/sernicord.bash" ;;
+    zsh)  cat "$dir/_sernicord" ;;
+    fish) cat "$dir/sernicord.fish" ;;
+    *) die "Usage: sernicord completion bash|zsh|fish" ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
   parse_args "$@"
+  case "$CMD" in
+    version) echo "sernicord ${VERSION}"; return ;;
+    completion) cmd_completion "${CMD_ARG:-}"; return ;;
+  esac
   mkdir -p "$ROOT/data" "$CLIENTS_DIR"
 
   case "$CMD" in

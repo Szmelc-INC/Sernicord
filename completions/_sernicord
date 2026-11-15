@@ -1,0 +1,52 @@
+#compdef sernicord
+
+_sernicord() {
+    local -a commands
+    commands=(
+        'dev:Build, sync plugins, inject, watch, launch (default)'
+        'up:Alias for dev'
+        'menu:Interactive menu'
+        'setup:Clone target, install deps, fetch Discord bootstrap'
+        'sync-plugins:Copy plugins/ into the target userplugins'
+        'build:Build target'
+        'watch:Rebuild on save'
+        'inject:Inject built mod into the profile Discord'
+        'uninject:Remove injection from the profile Discord'
+        'launch:Launch isolated Discord'
+        'fix:Re-inject after Discord self-update'
+        'update:Pull target, deps, rebuild, reinject'
+        'doctor:Check toolchain, paths, injection, privacy fences'
+        'status:Show profiles, targets, PIDs'
+        'stop:Stop watch and Discord for the profile'
+        'profiles:List local profiles'
+        'clean-build:Remove target dist/'
+        'completion:Print shell completion'
+        'version:Print version'
+        'help:Show help'
+    )
+
+    _arguments -C \
+        '--target[Mod tree]:target:(vencord equicord)' \
+        '--profile[Isolated data profile]:profile:' \
+        '--channel[Discord channel]:channel:(stable ptb canary)' \
+        '--system[DANGEROUS: operate on system Discord]' \
+        '--no-launch[Skip launching Discord]' \
+        '--no-watch[Skip file watch]' \
+        '--prod[Production build]' \
+        '(-y --yes)'{-y,--yes}'[Assume yes]' \
+        '(-h --help)'{-h,--help}'[Show help]' \
+        '(-V --version)'{-V,--version}'[Print version]' \
+        '1:command:->cmd' \
+        '*::arg:->args'
+
+    case $state in
+        cmd) _describe 'command' commands ;;
+        args)
+            case $words[1] in
+                completion) _values 'shell' bash zsh fish ;;
+            esac
+            ;;
+    esac
+}
+
+_sernicord "$@"

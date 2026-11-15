@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Packaged entry point: the sideloader writes clones, builds and profiles next to
+# itself, so mirror the read-only install into a writable workspace and run there.
+set -euo pipefail
+
+SHARE="@SHARE@"
+WORKSPACE="${SERNICORD_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/sernicord}"
+
+mkdir -p "$WORKSPACE"
+# --update keeps plugin edits that are newer than the packaged copy.
+rsync -a --update --chmod=u+w "$SHARE/" "$WORKSPACE/"
+
+export SERNICORD_COMPLETIONS="$SHARE/completions"
+exec "$WORKSPACE/sernicord" "$@"
