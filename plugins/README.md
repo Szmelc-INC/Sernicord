@@ -23,6 +23,7 @@ Bundled plugins:
 | `embedForge` | Webhook embeds / link buttons / markdown cards (`/embed`) |
 | `secretSentinel` | Local-only watcher for tokens/keys/emails + custom patterns |
 | `megaDrop` | Huge files via bashupload or peer chunk threads |
+| `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: keyword softener + LLM wordsmith (OpenAI-compatible/local or Anthropic) for your own messages, live or bulk (channel / server / DMs / everywhere), dry run + undo log |
 
 Local-only experiments can live directly under a cloned target’s `src/userplugins/`;
 only what you put here is meant for the public Sernicord repo.

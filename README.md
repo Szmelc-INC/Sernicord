@@ -109,6 +109,7 @@ Bundled plugins:
 | `embedForge` | Custom embeds / interactive link buttons |
 | `secretSentinel` | Pattern watcher; alerts stored locally |
 | `megaDrop` | Large files via bashupload or chunk threads |
+| `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: soften your own messages (keywords + optional LLM), live or bulk |
 
 Upstream Vencord gitignores `src/userplugins`; Sernicord keeps the publishable copies here instead.
 
