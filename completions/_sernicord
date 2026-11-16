@@ -15,7 +15,13 @@ _sernicord() {
         'launch:Launch isolated Discord'
         'fix:Re-inject after Discord self-update'
         'update:Pull target, deps, rebuild, reinject'
-        'doctor:Check toolchain, paths, injection, privacy fences'
+        'check:Scan and type-check plugins against the target API'
+        'rebuild:Stop watch, clean dist, full build, verify'
+        'repair:Fix pnpm, kill stale watchers, check, rebuild, reinject'
+        'reinstall:Uninject, wipe node_modules and dist, reinstall, rebuild, reinject'
+        'restart:Stop everything, then dev'
+        'logs:Show the watch log'
+        'doctor:Check toolchain, paths, build artifacts, injection, privacy fences'
         'status:Show profiles, targets, PIDs'
         'stop:Stop watch and Discord for the profile'
         'profiles:List local profiles'
@@ -34,6 +40,7 @@ _sernicord() {
         '--no-watch[Skip file watch]' \
         '--prod[Production build]' \
         '(-y --yes)'{-y,--yes}'[Assume yes]' \
+        '(-f --follow)'{-f,--follow}'[Follow the log (logs)]' \
         '(-h --help)'{-h,--help}'[Show help]' \
         '(-V --version)'{-V,--version}'[Print version]' \
         '1:command:->cmd' \

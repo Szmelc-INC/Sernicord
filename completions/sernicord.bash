@@ -3,8 +3,8 @@ _sernicord() {
     local cur prev cmds opts
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="dev up menu setup sync-plugins build watch inject uninject launch fix update doctor status stop profiles clean-build completion version help"
-    opts="--target --profile --channel --system --no-launch --no-watch --prod -y --yes -h --help -V --version"
+    cmds="dev up menu setup sync-plugins build watch inject uninject launch fix update check rebuild repair reinstall restart logs doctor status stop profiles clean-build completion version help"
+    opts="--target --profile --channel --system --no-launch --no-watch --prod -y --yes -f --follow -h --help -V --version"
 
     case "$prev" in
         --target) COMPREPLY=($(compgen -W "vencord equicord" -- "$cur")); return ;;

@@ -48,6 +48,7 @@ settings.json
 
 # --- Managed clones / build artifacts (sideloader owns these) ----------------
 /vencord/
+/vencord
 /equicord/
 /vesktop/
 /betterdiscord/

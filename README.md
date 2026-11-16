@@ -64,10 +64,24 @@ Then:
 | `launch` | Start isolated Discord for the profile |
 | `fix` | Rebuild + reinject after Discord updates |
 | `update` | `git pull` target + deps + rebuild + reinject |
-| `doctor` | Toolchain, paths, injection, privacy fences |
+| `check` | Scan `plugins/` for removed target APIs and type-check them (`tsc`) |
+| `rebuild` | Stop watch, wipe `dist/`, full build, verify every bundle exists |
+| `repair` | Fix pnpm, kill stale watchers, `check`, clean rebuild, reinject |
+| `reinstall` | Uninject, wipe `node_modules` + `dist/`, reinstall deps, rebuild, reinject |
+| `restart` | `stop`, then `dev` |
+| `logs [N]` / `logs -f` | Tail or follow the watch log |
+| `doctor` | Toolchain, paths, build artifacts, pnpm, injection, privacy fences |
 | `status` / `stop` / `profiles` | Inspect or shut down |
 
-Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `-y`, `--system` (dangerous).
+Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `-y`, `-f`, `--system` (dangerous).
+
+### Troubleshooting
+
+Discord shows *“A JavaScript error occurred in the main process … ENOENT … dist/renderer.js”*: the renderer
+bundle failed to build, usually because a plugin uses an API the target removed (for example `Forms`, `Button.Looks`
+or `Modal.ModalRoot` after Vencord 1.15.14). Run `./sernicord check` to see which plugin, then `./sernicord repair`.
+`build`, `inject` and `launch` now refuse to continue while any of `patcher.js`, `preload.js`, `renderer.js` or
+`renderer.css` is missing.
 
 Examples:
 
@@ -76,6 +90,8 @@ Examples:
 ./sernicord inject --profile alt
 ./sernicord update --target equicord
 ./sernicord fix
+./sernicord repair
+./sernicord check
 ./sernicord doctor
 ```
 

@@ -13,7 +13,7 @@
       packages = forAll (pkgs: rec {
         sernicord = pkgs.stdenvNoCC.mkDerivation {
           pname = "sernicord";
-          version = "1.0.0";
+          version = "1.1.0";
           src = self;
 
           nativeBuildInputs = [ pkgs.makeWrapper pkgs.installShellFiles ];
