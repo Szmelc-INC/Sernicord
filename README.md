@@ -133,6 +133,7 @@ Bundled plugins:
 | `secretSentinel` | Pattern watcher; alerts stored locally |
 | `megaDrop` | Large files via bashupload or chunk threads |
 | `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: soften your own messages (keywords + optional LLM), live or bulk |
+| `fullCyberJacket` | Finds hate speech, threats, self-harm encouragement and extremist slogans (leet / look-alike / spacing aware) in a user's or server's messages for **manual** review and reporting; never reports by itself |
 
 Upstream Vencord gitignores `src/userplugins`; Sernicord keeps the publishable copies here instead.
 
