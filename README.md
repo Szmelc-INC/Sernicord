@@ -35,8 +35,8 @@ for bash, zsh and fish is installed automatically; `sernicord completion <bash|z
 
 First run expects:
 
-- `git`, `node` (≥18), `pnpm`, `rsync`, `python3`
-- Official Linux Discord bootstrap under `discord-app/Discord/` (`updater_bootstrap` + `discord` launcher)
+- `git`, `node` (≥18), `pnpm`, `rsync`, `python3`, `curl`, `tar`
+- Network access to fetch the official Linux Discord bootstrap into `discord-app/Discord/` (`updater_bootstrap` + `discord` launcher; `setup`/`dev` download it automatically when missing)
 - Network access to clone [Vencord](https://github.com/Vendicated/Vencord) if `vencord/` is missing
 
 Then:
@@ -56,7 +56,7 @@ Then:
 | --- | --- |
 | `dev` / default | Sync plugins → build (dev) → inject → watch → launch |
 | `menu` | Interactive picker |
-| `setup` | Clone target, install deps, prepare Discord |
+| `setup` | Clone target, install deps, download Discord bootstrap + client |
 | `sync-plugins` | Copy `plugins/` → `<target>/src/userplugins/` |
 | `build [--prod]` | One-shot build |
 | `watch` | Rebuild on save |

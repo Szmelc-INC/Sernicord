@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 PLUGINS_DIR="$ROOT/plugins"
 CLIENTS_DIR="$ROOT/clients"
 DEFAULT_PROFILE="sernicord"
@@ -129,7 +129,7 @@ ${BLD}Usage:${RST}
 ${BLD}Commands:${RST}
   ${GRN}(default)|dev|up${RST}   Build target (dev), sync plugins, inject, watch, launch
   menu                 Interactive menu
-  setup                Clone target, install deps, fetch Discord bootstrap
+  setup                Clone target, install deps, download Discord bootstrap + client
   sync-plugins         Copy plugins/ → <target>/src/userplugins/
   build [--prod]       Build target (default: --dev)
   watch                Rebuild on save
@@ -348,19 +348,38 @@ repair_pnpm() {
   ok "pnpm $(cd "$src" && host pnpm -v)"
 }
 
+# Official Linux Discord tarball: Discord/{updater_bootstrap,discord,...}.
+# The bootstrap is channel-agnostic (the channel is passed when it runs), and the
+# stable launcher matches the discord/ config dir layout, so always fetch stable.
+DISCORD_TARBALL_URL="https://discord.com/api/download/stable?platform=linux&format=tar.gz"
+
+fetch_discord_bootstrap() {
+  local dest tmp
+  need curl
+  need tar
+  dest="$ROOT/discord-app"
+  tmp=$(mktemp -d)
+  info "Downloading official Linux Discord bootstrap"
+  if ! curl -fsSL --retry 3 -o "$tmp/discord.tar.gz" "$DISCORD_TARBALL_URL"; then
+    rm -rf "$tmp"
+    die "Failed to download $DISCORD_TARBALL_URL"
+  fi
+  if ! tar -xzf "$tmp/discord.tar.gz" -C "$tmp" Discord/updater_bootstrap Discord/discord; then
+    rm -rf "$tmp"
+    die "Discord tarball has no Discord/updater_bootstrap + Discord/discord"
+  fi
+  mkdir -p "$dest/Discord"
+  install -m 755 "$tmp/Discord/updater_bootstrap" "$tmp/Discord/discord" "$dest/Discord/"
+  rm -rf "$tmp"
+  ok "Discord bootstrap ready in discord-app/Discord/"
+}
+
 ensure_discord_bootstrap() {
-  local boot launch
-  boot=$(bootstrap_bin)
-  launch=$(launcher_bin)
-  if [[ -x "$boot" && -x "$launch" ]]; then
+  if [[ -x "$(bootstrap_bin)" && -x "$(launcher_bin)" ]]; then
     return 0
   fi
   warn "Discord bootstrap missing at discord-app/Discord/"
-  info "Fetching official Linux Discord ${CHANNEL} bootstrap via Vencord installer helpers is preferred."
-  info "Place updater_bootstrap + discord launcher under discord-app/Discord/ or re-run setup after adding them."
-  if [[ ! -x "$boot" ]]; then
-    die "Missing bootstrap: $boot"
-  fi
+  fetch_discord_bootstrap
 }
 
 ensure_client() {
@@ -373,8 +392,13 @@ ensure_client() {
   (( USE_SYSTEM )) && die "--system set but no Discord binary under $cfg"
   ensure_discord_bootstrap
   boot=$(bootstrap_bin)
+  # Newer bootstraps renamed --no-zenity to --no-gui
+  local nogui=--no-zenity
+  if "$boot" --help 2>&1 | grep -q -- '--no-gui'; then
+    nogui=--no-gui
+  fi
   info "Downloading standalone Discord ($CHANNEL) into $cfg"
-  "$boot" --no-zenity "$cfg" "$CHANNEL" "https://updates.discord.com/"
+  "$boot" "$nogui" "$cfg" "$CHANNEL" "https://updates.discord.com/"
   ok "Discord client ready"
 }
 
@@ -667,12 +691,9 @@ cmd_setup() {
   ensure_deps
   sync_plugins
   mkdir -p "$ROOT/data" "$ROOT/discord-app" "$CLIENTS_DIR"
-  if [[ ! -x "$(bootstrap_bin)" ]]; then
-    warn "discord-app bootstrap not present yet — add official Linux Discord files under discord-app/Discord/"
-    warn "or copy them from an existing Sernicord checkout. setup continues."
-  else
-    ensure_client
-  fi
+  apply_profile_env
+  ensure_discord_bootstrap
+  ensure_client
   ok "Setup complete for target=$TARGET profile=$PROFILE"
 }
 
@@ -857,8 +878,8 @@ cmd_doctor() {
     issues=$((issues + 1))
   fi
 
-  if [[ -x "$(bootstrap_bin)" ]]; then ok "bootstrap ok"; else warn "bootstrap missing"; issues=$((issues+1)); fi
-  if [[ -x "$(launcher_bin)" ]]; then ok "launcher ok"; else warn "launcher missing"; issues=$((issues+1)); fi
+  if [[ -x "$(bootstrap_bin)" ]]; then ok "bootstrap ok"; else warn "bootstrap missing — run ./sernicord setup"; issues=$((issues+1)); fi
+  if [[ -x "$(launcher_bin)" ]]; then ok "launcher ok"; else warn "launcher missing — run ./sernicord setup"; issues=$((issues+1)); fi
 
   echo
   info "Privacy fence"
@@ -875,12 +896,16 @@ cmd_doctor() {
     issues=$((issues + 1))
   fi
   local hooks
-  hooks=$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)
-  if [[ "$hooks" == ".githooks" ]]; then
-    ok "core.hooksPath=.githooks"
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    hooks=$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)
+    if [[ "$hooks" == ".githooks" ]]; then
+      ok "core.hooksPath=.githooks"
+    else
+      warn "git hooks not installed (run: git config core.hooksPath .githooks)"
+      issues=$((issues + 1))
+    fi
   else
-    warn "git hooks not installed (run: git config core.hooksPath .githooks)"
-    issues=$((issues + 1))
+    ok "not a git checkout — commit hooks not applicable"
   fi
 
   # Spot-check that data is not tracked

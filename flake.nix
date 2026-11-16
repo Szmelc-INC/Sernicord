@@ -7,13 +7,13 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      runtimeDeps = pkgs: with pkgs; [ bash git nodejs pnpm rsync python3 coreutils ];
+      runtimeDeps = pkgs: with pkgs; [ bash git nodejs pnpm rsync python3 coreutils curl gnutar gzip ];
     in
     {
       packages = forAll (pkgs: rec {
         sernicord = pkgs.stdenvNoCC.mkDerivation {
           pname = "sernicord";
-          version = "1.1.0";
+          version = "1.2.0";
           src = self;
 
           nativeBuildInputs = [ pkgs.makeWrapper pkgs.installShellFiles ];
