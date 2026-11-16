@@ -6,9 +6,10 @@
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { ChannelStore, Forms, showToast, useEffect, useState } from "@webpack/common";
+import { ChannelStore, showToast, useEffect, useState } from "@webpack/common";
 
 import { decryptText, encryptText, isSecurePayload } from "./crypto";
 
@@ -27,10 +28,10 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 AES-256-GCM with a shared passphrase. Peers with SecureChat + the same passphrase
                 decrypt automatically unless the author is blacklisted. Share the passphrase out of band.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     passphrase: {
@@ -128,18 +129,18 @@ function DecryptedAccessory({ message }: { message: Message; }) {
             background: "var(--background-secondary)",
             borderLeft: "3px solid var(--status-positive, #23a55a)"
         }}>
-            <Forms.FormText style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>
+            <Paragraph style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>
                 SecureChat decrypted
-            </Forms.FormText>
+            </Paragraph>
             {text != null && (
-                <Forms.FormText style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>{text}</Forms.FormText>
+                <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>{text}</Paragraph>
             )}
             {err && (
-                <Forms.FormText style={{ color: "var(--status-danger)" }}>
+                <Paragraph style={{ color: "var(--status-danger)" }}>
                     decrypt failed: {err}
-                </Forms.FormText>
+                </Paragraph>
             )}
-            {!text && !err && <Forms.FormText>decrypting…</Forms.FormText>}
+            {!text && !err && <Paragraph>decrypting…</Paragraph>}
         </div>
     );
 }
@@ -156,7 +157,7 @@ const EncryptButton: ChatBarButtonFactory = ({ isMainChat }) => {
                 setOn(next);
                 showToast({
                     text: next ? "SecureChat encrypt ON" : "SecureChat encrypt OFF",
-                    variant: "info"
+                    variant: "default"
                 });
             }}
         >
@@ -196,9 +197,10 @@ export default definePlugin({
         }
     },
 
-    renderMessageAccessory: ErrorBoundary.wrap(
-        (props: { message: Message; }) => <DecryptedAccessory message={props.message} />,
-        { noop: true }
+    renderMessageAccessory: props => (
+        <ErrorBoundary noop>
+            <DecryptedAccessory message={props.message as Message} />
+        </ErrorBoundary>
     ),
 
     chatBarButton: {

@@ -14,7 +14,7 @@ function b64encode(buf: ArrayBuffer | Uint8Array): string {
     return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function b64decode(s: string): Uint8Array {
+function b64decode(s: string): Uint8Array<ArrayBuffer> {
     const pad = "===".slice((s.length + 3) % 4);
     const normalized = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
     const bin = atob(normalized);
@@ -23,7 +23,7 @@ function b64decode(s: string): Uint8Array {
     return out;
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(passphrase: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
     const material = await crypto.subtle.importKey(
         "raw",
         encoder.encode(passphrase),
