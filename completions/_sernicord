@@ -25,6 +25,9 @@ _sernicord() {
         'status:Show profiles, targets, PIDs'
         'stop:Stop watch and Discord for the profile'
         'profiles:List local profiles'
+        'backup:Zip configs, themes, QuickCSS, plugins and session'
+        'restore:Restore a sernicord backup zip'
+        'scan:Find other Discord/Vencord traces on this system'
         'clean-build:Remove target dist/'
         'completion:Print shell completion'
         'version:Print version'
@@ -43,6 +46,12 @@ _sernicord() {
         '(-f --follow)'{-f,--follow}'[Follow the log (logs)]' \
         '(-h --help)'{-h,--help}'[Show help]' \
         '(-V --version)'{-V,--version}'[Print version]' \
+        '--no-color[Disable colors]' \
+        '--full[Backup: include Chromium caches]' \
+        '--plugins-only[Backup/restore: plugins only]' \
+        '--data-only[Restore: profile data only]' \
+        '--import[Scan: import scope]:scope:(settings themes quickcss cache plugins all)' \
+        '--from[Scan: import source directory]:dir:_dirs' \
         '1:command:->cmd' \
         '*::arg:->args'
 
@@ -51,6 +60,7 @@ _sernicord() {
         args)
             case $words[1] in
                 completion) _values 'shell' bash zsh fish ;;
+                restore) _files -g '*.zip' ;;
             esac
             ;;
     esac

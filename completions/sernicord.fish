@@ -1,5 +1,5 @@
 # fish completion for sernicord
-set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update check rebuild repair reinstall restart logs doctor status stop profiles clean-build completion version help
+set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update check rebuild repair reinstall restart logs doctor status stop profiles backup restore scan clean-build completion version help
 
 complete -c sernicord -f
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a dev -d 'Build, sync, inject, watch, launch (default)'
@@ -24,6 +24,9 @@ complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a doctor -d 'C
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a status -d 'Show profiles and PIDs'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a stop -d 'Stop watch and Discord'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a profiles -d 'List profiles'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a backup -d 'Zip configs, themes, QuickCSS, plugins, session'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a restore -d 'Restore a sernicord backup zip'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a scan -d 'Find other Discord/Vencord traces'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a clean-build -d 'Remove target dist/'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a completion -d 'Print shell completion'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a version -d 'Print version'
@@ -41,3 +44,11 @@ complete -c sernicord -s y -l yes -d 'Assume yes'
 complete -c sernicord -s f -l follow -d 'Follow the log (logs)'
 complete -c sernicord -s h -l help -d 'Show help'
 complete -c sernicord -s V -l version -d 'Print version'
+
+complete -c sernicord -n "__fish_seen_subcommand_from restore" -a "(__fish_complete_path '*.zip')"
+complete -c sernicord -n "__fish_seen_subcommand_from scan" -l import -x -a 'settings themes quickcss cache plugins all' -d 'Import scope'
+complete -c sernicord -n "__fish_seen_subcommand_from scan" -l from -r -a "(__fish_complete_directories)" -d 'Import source'
+complete -c sernicord -l no-color -d 'Disable colors (honors NO_COLOR)'
+complete -c sernicord -l full -d 'Backup: include Chromium caches'
+complete -c sernicord -l plugins-only -d 'Backup/restore: plugins only'
+complete -c sernicord -l data-only -d 'Restore: profile data only'

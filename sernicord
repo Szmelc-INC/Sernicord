@@ -8,27 +8,81 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 PLUGINS_DIR="$ROOT/plugins"
 CLIENTS_DIR="$ROOT/clients"
 DEFAULT_PROFILE="sernicord"
 DEFAULT_TARGET="vencord"
 DEFAULT_CHANNEL="stable"
 
-# Colors when stdout is a TTY
-if [[ -t 1 ]]; then
-  RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; BLU=$'\033[34m'
-  MAG=$'\033[35m'; CYN=$'\033[36m'; BLD=$'\033[1m'; RST=$'\033[0m'
+# ---------------------------------------------------------------------------
+# Color engine — Szmelc brand palette
+#   accent  cyan      #1f8a8a (CLI lift of #105c5c)
+#   danger  red       #b83a3a (CLI lift of #750f0f)
+#   silver  #c0c0c0   (labels / secondary)
+#   aqua    #7fffd4   (sparingly, highlights)
+# Honors --no-color, NO_COLOR, non-TTY output and terminal color depth.
+# ---------------------------------------------------------------------------
+for _a in "$@"; do
+  case "$_a" in
+    --no-color|--color=never) NO_COLOR=1 ;;
+    --color=always) FORCE_COLOR=1 ;;
+  esac
+done
+unset _a
+
+color_depth() {
+  if [[ -n "${FORCE_COLOR:-}" ]]; then printf '3'; return; fi
+  [[ -t 1 && -z "${NO_COLOR:-}" ]] || return 1
+  case "${COLORTERM:-}" in truecolor|24bit) printf '3' ;;
+  *) [[ "${TERM:-}" == *256color* ]] && printf '2' || printf '1' ;;
+  esac
+}
+
+if depth=$(color_depth) && [[ -n "$depth" ]]; then
+  GRN=$'\033[32m'; YLW=$'\033[33m'; BLD=$'\033[1m'; RST=$'\033[0m'; DIM=$'\033[2m'; ITL=$'\033[3m'
+  case "$depth" in
+    3)
+      ACC=$'\033[38;2;31;138;138m'; DANGER=$'\033[38;2;184;58;58m'
+      AQUA=$'\033[38;2;127;255;212m'; SILVER=$'\033[38;2;170;170;170m'
+      ;;
+    2)
+      ACC=$'\033[38;5;30m'; DANGER=$'\033[38;5;124m'; AQUA=$'\033[38;5;86m'; SILVER=$'\033[38;5;145m'
+      ;;
+    *)
+      ACC=$'\033[36m'; DANGER=$'\033[31m'; AQUA=$'\033[36m'; SILVER=$'\033[37m'; DIM=$'\033[0m'
+      ;;
+  esac
 else
-  RED=; GRN=; YLW=; BLU=; MAG=; CYN=; BLD=; RST=
+  GRN=; YLW=; BLD=; RST=; DIM=; ITL=; ACC=; DANGER=; AQUA=; SILVER=
 fi
+unset depth
+# Compat aliases used across the script
+RED=$DANGER; CYN=$ACC; MAG=$ACC; BLU=$ACC
 
 log()  { printf '%s\n' "$*"; }
-info() { printf '%s==>%s %s\n' "$CYN" "$RST" "$*"; }
-ok()   { printf '%sOK%s  %s\n' "$GRN" "$RST" "$*"; }
-warn() { printf '%s!!%s  %s\n' "$YLW" "$RST" "$*" >&2; }
-die()  { printf '%sXX%s  %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
+info() { printf '%s==>%s %s\n' "$ACC" "$RST" "$*"; }
+ok()   { printf '%s%s✔%s %s\n' "$GRN" "$BLD" "$RST" "$*"; }
+warn() { printf '%s%s⚠%s  %s\n' "$YLW" "$BLD" "$RST" "$*" >&2; }
+die()  { printf '%s%s✖%s  %s\n' "$DANGER" "$BLD" "$RST" "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+# Section header: ── TITLE ─────────────
+hdr() {
+  local title="$1" width=60 line
+  printf '%s' "$ACC$BLD"
+  printf '%.0s─' $(seq 1 2)
+  printf ' %s ' "$title"
+  line=$(( width - ${#title} - 3 ))
+  (( line > 0 )) && printf '%.0s─' $(seq 1 $line)
+  printf '%s\n' "$RST"
+}
+
+# Aligned key : value row
+kv() { printf '  %s%-22s%s %s%s%s\n' "$SILVER" "$1" "$RST" "$2" "${3:-}" "${4:-}"; }
+
+# Muted note
+note() { printf '  %s%s%s\n' "$DIM" "$*" "$RST"; }
 
 # Profile env overrides XDG_* for Discord only. Build tools (pnpm, node) must see
 # the host XDG dirs, or pnpm self-installs a second, broken copy under data/share.
@@ -121,64 +175,76 @@ launcher_bin() {
 # ---------------------------------------------------------------------------
 usage() {
   cat <<EOF
-${BLD}Sernicord${RST} v${VERSION} — A Better Vencord+ for devs & serniks
+${ACC}${BLD}███████${RST}${BLD}Sernicord${RST} v${VERSION} ${SILVER}— A Better Vencord+ for devs & serniks${RST}
+${DIM}     universal Discord mod sideloader${RST}
 
-${BLD}Usage:${RST}
-  ./sernicord [command] [options]
+${ACC}${BLD}Usage${RST}   ${BLD}./sernicord${RST} ${SILVER}[command]${RST} ${DIM}[options]${RST}
 
-${BLD}Commands:${RST}
-  ${GRN}(default)|dev|up${RST}   Build target (dev), sync plugins, inject, watch, launch
-  menu                 Interactive menu
-  setup                Clone target, install deps, fetch Discord bootstrap
-  sync-plugins         Copy plugins/ → <target>/src/userplugins/
-  build [--prod]       Build target (default: --dev)
-  watch                Rebuild on save
-  inject               Inject built mod into the profile's Discord
-  uninject             Remove injection from the profile's Discord
-  launch               Launch isolated Discord for the profile
-  fix                  Re-inject after Discord self-update / broken patch
-  update               git pull target + deps + rebuild + reinject
-  check                Scan plugins/ for removed target APIs + type-check them
-  rebuild              Stop watch, clean dist/, full build, verify, restart watch
-  repair               Fix pnpm, kill stale watchers, check, clean rebuild, reinject
-  reinstall            Uninject, wipe node_modules + dist, reinstall, rebuild, reinject
-  restart              Stop everything, then dev
-  logs [N]             Show the last N lines of the watch log (-f to follow)
-  doctor               Check toolchain, paths, build artifacts, injection, fences
-  status               Show profiles, targets, watch/discord PIDs
-  stop                 Stop watch + this profile's Discord
-  profiles             List local profiles
-  clean-build          Remove target dist/ (keeps sources)
-  completion SHELL     Print shell completion: bash | zsh | fish
-  version              Print version
-  help                 This help
+${ACC}── Development ─────────────────────────────────────${RST}
+  ${GRN}(default)|dev|up${RST}     Build target (dev), sync plugins, inject, watch, launch
+  menu                     Interactive menu
+  setup                    Clone target, install deps, fetch Discord bootstrap
+  sync-plugins             Copy plugins/ → <target>/src/userplugins/
+  build [--prod]           Build target (default: --dev)
+  watch                    Rebuild on save
+  restart                  Stop everything, then dev
 
-${BLD}Options:${RST}
-  --target NAME        Mod tree: vencord (default) | equicord
-  --profile NAME       Isolated data profile (default: ${DEFAULT_PROFILE})
-  --channel NAME       Discord channel: stable | ptb | canary (default: stable)
-  --system             DANGEROUS: operate on system Discord (requires confirm)
-  --no-launch          Skip launching Discord (dev/up)
-  --no-watch           Skip starting file watch (dev/up)
-  --prod               Production build instead of --dev
-  -y, --yes            Assume yes for prompts
-  -f, --follow         Follow the log (logs)
+${ACC}── Injection / lifecycle ────────────────────────────${RST}
+  inject                   Inject built mod into the profile's Discord
+  uninject                 Remove injection from the profile's Discord
+  launch                   Launch isolated Discord for the profile
+  fix                      Re-inject after Discord self-update / broken patch
+  update                   git pull target + deps + rebuild + reinject
+  stop                     Stop watch + this profile's Discord
 
-${BLD}Examples:${RST}
-  ./sernicord                      # full Sernicord dev (default)
-  ./sernicord menu
-  ./sernicord repair               # "JavaScript error … dist/renderer.js" on start
-  ./sernicord check                # after a Vencord update broke a plugin
-  ./sernicord logs -f
-  ./sernicord inject --profile alt
-  ./sernicord update --target equicord
-  ./sernicord fix --profile sernicord
-  ./sernicord doctor
+${ACC}── Maintenance ──────────────────────────────────────${RST}
+  check                    Scan plugins/ for removed target APIs + type-check them
+  rebuild                  Stop watch, clean dist/, full build, verify, restart watch
+  repair                   Fix pnpm, kill stale watchers, check, clean rebuild, reinject
+  reinstall                Uninject, wipe node_modules + dist, reinstall, rebuild, reinject
+  clean-build              Remove target dist/ (keeps sources)
+  doctor                   Check toolchain, paths, build artifacts, injection, fences
+  status                   Show profiles, targets, watch/discord PIDs
+  profiles                 List local profiles
+  logs [N]                 Show the last N lines of the watch log (${BLD}-f${RST} to follow)
 
-${BLD}Privacy:${RST}
-  Profiles live under data/ (gitignored). Never commit data/, discord-app/,
+${ACC}── Backup / migration ───────────────────────────────${RST}
+  ${AQUA}backup${RST} [out.zip]           Zip configs, themes, QuickCSS, plugins (+ session cache)
+                           ${DIM}--full also packs Chromium caches; --plugins-only just plugins/${RST}
+  ${AQUA}restore${RST} <file.zip>         Restore a backup into the current profile
+                           ${DIM}--plugins-only / --data-only limit what is restored${RST}
+  ${AQUA}scan${RST}                       Find other Discord/Vencord/Vesktop/BetterDiscord traces
+                           ${DIM}--import settings|themes|quickcss|cache|plugins|all --from <dir>${RST}
+                           ${DIM}imports into Sernicord (no import without an explicit --import)${RST}
+
+${ACC}── Misc ─────────────────────────────────────────────${RST}
+  completion SHELL         Print shell completion: bash | zsh | fish
+  version | help           Version / this help
+
+${ACC}── Options ──────────────────────────────────────────${RST}
+  ${SILVER}--target${RST} NAME            Mod tree: vencord (default) | equicord
+  ${SILVER}--profile${RST} NAME           Isolated data profile (default: ${DEFAULT_PROFILE})
+  ${SILVER}--channel${RST} NAME           Discord channel: stable | ptb | canary (default: stable)
+  ${SILVER}--system${RST}                 ${DANGER}DANGEROUS${RST}: operate on system Discord (requires confirm)
+  ${SILVER}--no-launch${RST}              Skip launching Discord (dev/up)
+  ${SILVER}--no-watch${RST}               Skip starting file watch (dev/up)
+  ${SILVER}--prod${RST}                   Production build instead of --dev
+  ${SILVER}--no-color${RST}               Disable colors (also honors ${SILVER}NO_COLOR${RST})
+  ${SILVER}-y, --yes${RST}                Assume yes for prompts
+  ${SILVER}-f, --follow${RST}             Follow the log (logs)
+
+${ACC}── Examples ─────────────────────────────────────────${RST}
+  ${BLD}./sernicord${RST}                          ${DIM}# full Sernicord dev (default)${RST}
+  ${BLD}./sernicord${RST} backup                   ${DIM}# data/backups/sernicord-backup-<date>.zip${RST}
+  ${BLD}./sernicord${RST} restore my.zip -y        ${DIM}# restore everything, no prompts${RST}
+  ${BLD}./sernicord${RST} scan                     ${DIM}# what other Discord data exists here?${RST}
+  ${BLD}./sernicord${RST} scan --import themes --from ~/.config/Vencord
+  ${BLD}./sernicord${RST} repair                   ${DIM}# "JavaScript error … dist/renderer.js" on start${RST}
+
+${ACC}── Privacy ─────────────────────────────────────────${RST}
+  ${DIM}Profiles live under data/ (gitignored). Never commit data/, discord-app/,
   client clones, Cookies, Local Storage, or settings backups. Pre-commit
-  hook + scripts/secret-scan.sh enforce this.
+  hook + scripts/secret-scan.sh enforce this.${RST}
 EOF
 }
 
@@ -196,6 +262,12 @@ NO_WATCH=0
 PROD=0
 ASSUME_YES=0
 FOLLOW=0
+BACKUP_FULL=0
+BACKUP_PLUGINS_ONLY=0
+RESTORE_PLUGINS_ONLY=0
+RESTORE_DATA_ONLY=0
+IMPORT_SCOPE=""
+IMPORT_FROM=""
 
 parse_args() {
   local positional=()
@@ -212,6 +284,12 @@ parse_args() {
       --prod) PROD=1; shift ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -f|--follow) FOLLOW=1; shift ;;
+      --no-color|--color=never|--color=always) shift ;;
+      --full) BACKUP_FULL=1; shift ;;
+      --plugins-only) BACKUP_PLUGINS_ONLY=1; RESTORE_PLUGINS_ONLY=1; shift ;;
+      --data-only) RESTORE_DATA_ONLY=1; shift ;;
+      --import) IMPORT_SCOPE="${2:-}"; shift 2 ;;
+      --from) IMPORT_FROM="${2:-}"; shift 2 ;;
       --) shift; break ;;
       -*)
         die "Unknown option: $1 (try ./sernicord help)"
@@ -227,6 +305,10 @@ parse_args() {
     CMD_ARG="${positional[1]:-}"
     # allow: ./sernicord build --prod already handled; leftover positionals ignored
   fi
+  case "$IMPORT_SCOPE" in
+    ""|settings|themes|quickcss|cache|plugins|all) ;;
+    *) die "Unsupported --import '$IMPORT_SCOPE' (settings|themes|quickcss|cache|plugins|all)" ;;
+  esac
   case "$TARGET" in
     vencord|equicord) ;;
     *) die "Unsupported --target '$TARGET' (vencord|equicord)" ;;
@@ -659,6 +741,368 @@ launch_discord() {
 }
 
 # ---------------------------------------------------------------------------
+# Backup / restore / scan
+# ---------------------------------------------------------------------------
+# Profile XDG tree parts (config/share/cache/state) — legacy layout for the
+# default profile, data/profiles/<name> otherwise
+profile_xdg_parent() {
+  if [[ "$PROFILE" == "$DEFAULT_PROFILE" && -d "$ROOT/data/config" ]]; then
+    echo "$ROOT/data"
+  else
+    echo "$(profile_root "$PROFILE")"
+  fi
+}
+
+vencord_data_dir() {
+  echo "$(profile_xdg_parent)/config/Vencord"
+}
+
+profile_discord_dir() {
+  resolve_discord_config "$PROFILE"
+}
+
+# Volatile / huge Chromium paths excluded from backups unless --full
+BACKUP_EXCLUDES=(
+  'config/*/Cache/*' 'config/*/Code Cache/*' 'config/*/GPUCache/*' 'config/*/GPUPersistentCache/*'
+  'config/*/DawnGraphiteCache/*' 'config/*/DawnWebGPUCache/*' 'config/*/Crashpad/*'
+  'config/*/blob_storage/*' 'config/*/Service Worker/*' 'config/*/Shared Dictionary/*'
+  'config/*/Dictionaries/*' 'config/*/ShaderCache/*' 'config/*/discord_asset_cache/*'
+  'config/discord/module_data/*' 'config/discord/logs/*' 'config/discord/download/*'
+  'config/discord/1.0.*' 'config/discord/app-*' 'config/discord/Discord' 'config/discord/updater.node'
+  'config/discord/Singleton*' 'config/discord/sentry/*'
+  'config/thorium' 'config/thorium/*'
+  'cache/*' 'cache' 'share/pnpm/*' '*.pid' 'watch*.log' '*/Singleton*' '*/.DS_Store'
+)
+
+make_zip() {
+  # make_zip <out.zip> <dir> <path...> — append paths to a zip, relative to dir
+  local out="$1" dir="$2"; shift 2
+  if command -v zip >/dev/null 2>&1; then
+    (cd "$dir" && zip -q -r -u "$out" "$@")
+  else
+    BACKUP_EXCLUDES="${BACKUP_EXCLUDES[*]}" python3 -I - "$out" "$dir" "$@" <<'PY'
+import fnmatch, os, sys, zipfile
+out, root, paths = sys.argv[1], sys.argv[2], sys.argv[3:]
+excludes = os.environ["BACKUP_EXCLUDES"].split()
+def excluded(rel):
+    return any(fnmatch.fnmatch(rel, pat) for pat in excludes)
+with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as z:
+    for p in paths:
+        for base, _, files in os.walk(os.path.join(root, p)):
+            for f in files:
+                full = os.path.join(base, f)
+                rel = os.path.relpath(full, root)
+                if not excluded(rel):
+                    z.write(full, rel)
+PY
+  fi
+}
+
+dir_size() {
+  du -sh "$1" 2>/dev/null | cut -f1 || echo "?"
+}
+
+cmd_backup() {
+  local out="${CMD_ARG:-}" parent vc dd tmp manifest
+  [[ -n "$out" ]] || out="$ROOT/data/backups/sernicord-backup-$(date +%Y%m%d-%H%M%S).zip"
+  mkdir -p "$(dirname "$out")"
+  parent=$(profile_xdg_parent)
+  vc=$(vencord_data_dir)
+  dd=$(profile_discord_dir)
+
+  hdr "Sernicord backup → $out"
+  if (( BACKUP_PLUGINS_ONLY )); then
+    info "Scope: plugins/ only"
+  else
+    info "Scope: profile configs (discord + Vencord settings, themes, QuickCSS, session)"
+    (( BACKUP_FULL )) && info "      + full caches (--full)" || note "heavy Chromium caches skipped (use --full to include)"
+    kv "profile" "$PROFILE"
+    kv "target" "$TARGET"
+    kv "discord data" "$dd ${DIM}($(dir_size "$dd" 2>/dev/null))${RST}"
+    [[ -d "$vc" ]] && kv "vencord data" "$vc ${DIM}($(dir_size "$vc"))${RST}"
+    [[ -d "$parent/state" ]] && kv "state" "$parent/state"
+  fi
+  kv "plugins" "$PLUGINS_DIR ${DIM}($(dir_size "$PLUGINS_DIR"))${RST}"
+
+  rm -f "$out"
+  tmp=$(mktemp -d)
+  manifest=$(printf '%s' "{
+  \"tool\": \"sernicord\",
+  \"version\": \"${VERSION}\",
+  \"created\": \"$(date -Is)\",
+  \"target\": \"${TARGET}\",
+  \"profile\": \"${PROFILE}\",
+  \"full\": ${BACKUP_FULL},
+  \"pluginsOnly\": ${BACKUP_PLUGINS_ONLY}
+}")
+  printf '%s\n' "$manifest" > "$tmp/manifest.json"
+
+  if (( BACKUP_PLUGINS_ONLY )); then
+    make_zip "$out" "$ROOT" plugins || die "zip failed (plugins/)"
+  else
+    local parts=(config)
+    [[ -d "$parent/share" ]] && parts+=(share)
+    [[ -d "$parent/state" ]] && parts+=(state)
+    (( BACKUP_FULL )) && [[ -d "$parent/cache" ]] && parts+=(cache)
+    if command -v zip >/dev/null 2>&1; then
+      local -a xargs=(-x)
+      local e
+      for e in "${BACKUP_EXCLUDES[@]}"; do xargs+=("$e"); done
+      (cd "$parent" && zip -q -r "$out" "${parts[@]}" "${xargs[@]}")
+    else
+      make_zip "$out" "$parent" "${parts[@]}"
+    fi
+    make_zip "$out" "$ROOT" plugins || die "zip failed (plugins/)"
+  fi
+  make_zip "$out" "$tmp" manifest.json
+  rm -rf "$tmp"
+
+  [[ -s "$out" ]] || die "Backup zip is empty/missing: $out"
+  ok "Backup written: $out ($(dir_size "$out"))"
+  note "Keep it private — it contains your Discord session (Cookies, Local Storage)."
+}
+
+restore_plugins_from() {
+  # restore_plugins_from <staged-plugins-dir>
+  local src="$1" d name count=0
+  for d in "$src"/*/; do
+    [[ -d "$d" ]] || continue
+    name=$(basename "$d")
+    [[ "$name" == .* ]] && continue
+    if [[ -d "$PLUGINS_DIR/$name" ]] && ! (( ASSUME_YES )); then
+      confirm "Overwrite existing plugin '$name'?" || { info "  kept  $name"; continue; }
+    fi
+    mkdir -p "$PLUGINS_DIR/$name"
+    rsync -a "$d"/ "$PLUGINS_DIR/$name/"
+    count=$((count + 1))
+    ok "  plugin  $name"
+  done
+  (( count )) || warn "No plugin directories found in backup"
+}
+
+cmd_restore() {
+  local zip="${CMD_ARG:-}" tmp parent
+  [[ -n "$zip" ]] || die "Usage: ./sernicord restore <file.zip> [--plugins-only|--data-only] [-y]"
+  [[ -f "$zip" ]] || die "Backup not found: $zip"
+  (( RESTORE_PLUGINS_ONLY && RESTORE_DATA_ONLY )) && die "--plugins-only and --data-only are mutually exclusive"
+  tmp=$(mktemp -d)
+  hdr "Sernicord restore ← $zip"
+  info "Extracting to $tmp"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$zip" -d "$tmp" || die "unzip failed"
+  else
+    python3 - "$zip" "$tmp" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
+PY
+  fi
+  [[ -f "$tmp/manifest.json" ]] || warn "No manifest.json — restoring as generic zip"
+
+  if (( ! RESTORE_DATA_ONLY )); then
+    if [[ -d "$tmp/plugins" ]]; then
+      info "Restoring plugins/ → $PLUGINS_DIR"
+      confirm "Restore plugins from backup?" || die "Aborted"
+      restore_plugins_from "$tmp/plugins"
+    else
+      (( RESTORE_PLUGINS_ONLY )) && warn "Backup has no plugins/ directory"
+    fi
+  fi
+  if (( ! RESTORE_PLUGINS_ONLY )); then
+    if [[ -d "$tmp/config" ]]; then
+      parent=$(profile_xdg_parent)
+      kv "target profile" "$PROFILE → $parent"
+      if (( RESTORE_DATA_ONLY )) || confirm "Restore profile data (configs/settings/themes/session) into '${PROFILE}'? Existing files are overwritten"; then
+        info "Restoring profile data"
+        for part in config share state; do
+          [[ -d "$tmp/$part" ]] || continue
+          mkdir -p "$parent/$part"
+          rsync -a "$tmp/$part"/ "$parent/$part/"
+          ok "  $part/"
+        done
+        # stale Chromium singletons from a live session would block launch
+        local cfg; cfg=$(profile_discord_dir)
+        rm -f "$cfg"/Singleton{Lock,Cookie,Socket} 2>/dev/null || true
+        ok "Cleaned stale singleton locks"
+      else
+        die "Aborted"
+      fi
+    else
+      (( RESTORE_DATA_ONLY )) && die "Backup has no profile data (config/)"
+    fi
+  fi
+  rm -rf "$tmp"
+  ok "Restore finished"
+  info "Next: ./sernicord build  (or ./sernicord dev)"
+}
+
+# Known trace locations on this system
+scan_candidates() {
+  cat <<EOF
+vencord|~/.config/Vencord
+vencord|~/.config/Equicord
+vencord|~/.config/vesktop/Vencord
+vencord|~/.config/Vesktop/Vencord
+discord|~/.config/discord
+discord|~/.config/discordPTB
+discord|~/.config/discordcanary
+discord|~/.config/Vesktop
+discord|~/.config/vesktop
+discord|~/.config/WebCord
+discord|~/.var/app/com.discordapp.Discord/config/discord
+discord|~/.var/app/com.vencord.Vesktop/config/vesktop
+betterdiscord|~/.config/BetterDiscord
+sernicord|~/Projects-2/VENCORD
+sernicord|~/Projects-3/VENCORD
+sernicord|~/Projects-4/VENCORD
+sernicord|~/Projects-5/VENCORD
+EOF
+}
+
+expand_path() { echo "${1/#\~/$HOME}"; }
+
+trace_caps() {
+  # trace_caps <root> → space-separated capabilities
+  local r="$1" caps=""
+  [[ -d "$r/settings" && -f "$r/settings/settings.json" ]] && caps+=" settings"
+  [[ -f "$r/settings/quickCss.css" ]] && caps+=" quickcss"
+  ls "$r"/themes/*.theme.css >/dev/null 2>&1 && caps+=" themes"
+  [[ -d "$r/plugins" ]] && caps+=" bd-plugins"
+  # discord-style dir: sibling Vencord dir counts as its vencord data
+  if [[ -d "$r/Vencord/settings" || -d "$r/Vencord/themes" ]]; then caps+=" vencord-data"; fi
+  [[ -f "$r/Cookies" || -d "$r/Local Storage" ]] && caps+=" cache"
+  [[ -d "$r/src/userplugins" ]] && caps+=" userplugins"
+  [[ -d "$r/plugins" && -f "$r/sernicord" ]] && caps+=" sernicord-plugins"
+  echo "$caps"
+}
+
+cmd_scan() {
+  local line kind path real caps found=0 row kindcol
+  hdr "Sernicord scan — Discord / Vencord traces on this system"
+  while IFS='|' read -r kind path; do
+    real=$(expand_path "$path")
+    [[ -e "$real" ]] || continue
+    [[ "$real" == "$ROOT" ]] && continue
+    caps=$(trace_caps "$real")
+    [[ -z "$caps" ]] && continue
+    found=$((found + 1))
+    printf '  %s%-13s%s %s\n' "$ACC$BLD" "$kind" "$RST" "$real"
+    kv "size" "$(dir_size "$real")"
+    kv "has" "${SILVER}${caps# }${RST}"
+    echo
+  done < <(scan_candidates)
+
+  # legacy default layout of this checkout also holds live data
+  if [[ -d "$ROOT/data/config/discord" ]]; then
+    printf '  %s%-13s%s %s\n' "$AQUA$BLD" "this repo" "$RST" "$ROOT/data/config (legacy default profile)"
+  fi
+
+  if (( found == 0 )); then
+    warn "No other Discord/Vencord traces found"
+    return 0
+  fi
+  note "Import (nothing is touched until you say so):"
+  note "  ./sernicord scan --import settings|themes|quickcss|cache|plugins|all --from <dir> [-y]"
+  (( ${#IMPORT_SCOPE} )) || return 0
+  [[ -n "$IMPORT_FROM" ]] || die "--import needs --from <dir>"
+  import_trace
+}
+
+import_trace() {
+  local src kind r vc dest parent
+  src=$(expand_path "$IMPORT_FROM")
+  [[ -e "$src" ]] || die "--from path not found: $src"
+  parent=$(profile_xdg_parent)
+  vc=$(vencord_data_dir)
+  dest="$vc"
+  # Normalize: discord config dir → its sibling Vencord data dir
+  if [[ ! -d "$src/settings" && ! -d "$src/themes" ]]; then
+    if [[ -d "$src/Vencord" ]]; then r="$src/Vencord"; fi
+    if [[ -d "$src/src/userplugins" ]]; then r="$src"; fi
+  fi
+  r="${r:-$src}"
+
+  hdr "Import '$IMPORT_SCOPE' ← $src"
+  kv "into profile" "$PROFILE"
+
+  local do_settings=0 do_themes=0 do_quick=0 do_cache=0 do_plugins=0
+  case "$IMPORT_SCOPE" in
+    all) do_settings=1; do_themes=1; do_quick=1; do_cache=1; do_plugins=1 ;;
+    settings) do_settings=1 ;;
+    themes) do_themes=1 ;;
+    quickcss) do_quick=1 ;;
+    cache) do_cache=1 ;;
+    plugins) do_plugins=1 ;;
+  esac
+
+  confirm "Import '$IMPORT_SCOPE' from $src into profile '$PROFILE'?" || die "Aborted"
+
+  if (( do_settings )); then
+    if [[ -f "$r/settings/settings.json" ]]; then
+      mkdir -p "$dest/settings"
+      [[ -f "$dest/settings/settings.json" ]] && cp "$dest/settings/settings.json" "$dest/settings/settings.json.pre-import"
+      cp "$r/settings/settings.json" "$dest/settings/settings.json"
+      ok "settings.json imported (previous copy kept as .pre-import)"
+      note "plugin enablement + theme links came along; run ./sernicord build"
+    else
+      warn "no settings/settings.json under $r"
+    fi
+  fi
+  if (( do_quick )); then
+    if [[ -f "$r/settings/quickCss.css" ]]; then
+      mkdir -p "$dest/settings"
+      cp "$r/settings/quickCss.css" "$dest/settings/quickCss.css"
+      ok "QuickCSS imported"
+    else
+      warn "no settings/quickCss.css under $r"
+    fi
+  fi
+  if (( do_themes )); then
+    local t count=0
+    mkdir -p "$dest/themes"
+    for t in "$r"/themes/*.theme.css; do
+      [[ -f "$t" ]] || continue
+      cp -n "$t" "$dest/themes/"
+      count=$((count + 1))
+    done
+    (( count )) && ok "$count theme(s) imported into $dest/themes" || warn "no *.theme.css under $r/themes"
+  fi
+  if (( do_cache )); then
+    local d="$src" target
+    # accept either the discord config dir itself or a parent containing discord/
+    [[ ! -f "$d/Cookies" && ! -d "$d/Local Storage" && -d "$d/discord" ]] && d="$d/discord"
+    if [[ -f "$d/Cookies" || -d "$d/Local Storage" ]]; then
+      target=$(profile_discord_dir)
+      confirm "Copy Discord session (login) from $d into $target? This overwrites the current session" || die "Aborted"
+      mkdir -p "$target"
+      for item in Cookies Cookies-journal "Local Storage" "Session Storage" IndexedDB Preferences "Local State" settings.json; do
+        [[ -e "$d/$item" ]] || continue
+        rm -rf "$target/$item"
+        cp -a "$d/$item" "$target/"
+        ok "  $item"
+      done
+      ok "Session imported — launch with: ./sernicord launch"
+    else
+      warn "no Discord session data found under $src"
+    fi
+  fi
+  if (( do_plugins )); then
+    local up="" p
+    [[ -d "$src/plugins" && -f "$src/sernicord" ]] && up="$src/plugins"
+    [[ -z "$up" && -d "$src/src/userplugins" ]] && up="$src/src/userplugins"
+    if [[ -n "$up" ]]; then
+      info "Importing plugins from $up → $PLUGINS_DIR"
+      restore_plugins_from "$up"
+      note "run ./sernicord check to type-check imported plugins"
+    else
+      warn "no importable plugins (Sernicord checkout plugins/ or a Vencord clone src/userplugins)"
+      [[ -d "$src/plugins" ]] && note "BetterDiscord .plugin.js files cannot run on Vencord — skipping"
+    fi
+  fi
+  ok "Import finished"
+}
+
+# ---------------------------------------------------------------------------
 # Higher-level commands
 # ---------------------------------------------------------------------------
 cmd_setup() {
@@ -973,7 +1417,8 @@ ${BLD}${MAG}Sernicord${RST}  target=${CYN}$TARGET${RST}  profile=${CYN}$PROFILE$
   6) Launch                              12) Switch target/profile
   13) Check plugins                      15) Repair (full)
   14) Rebuild (clean)                    16) Reinstall deps
-  17) Watch log
+  17) Watch log                          18) Backup (zip)
+  19) Restore backup                     20) Scan for Discord traces
   0) Quit
 EOF
     local choice
@@ -1003,6 +1448,12 @@ EOF
       15) cmd_repair || true ;;
       16) cmd_reinstall || true ;;
       17) cmd_logs || true ;;
+      18) cmd_backup || true ;;
+      19)
+        read -r -p "Backup zip path: " z
+        CMD_ARG="$z" cmd_restore || true
+        ;;
+      20) cmd_scan || true ;;
       0|q|Q) exit 0 ;;
       *) warn "Unknown choice" ;;
     esac
@@ -1054,6 +1505,9 @@ main() {
     status) cmd_status ;;
     stop) stop_all ;;
     profiles) cmd_profiles ;;
+    backup) cmd_backup ;;
+    restore) cmd_restore ;;
+    scan) cmd_scan ;;
     clean-build) cmd_clean_build ;;
     dev|up|start|"") cmd_dev ;;
     *)
