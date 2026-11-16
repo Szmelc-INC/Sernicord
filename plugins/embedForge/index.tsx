@@ -5,11 +5,11 @@
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import {
-    Button,
-    Forms,
     Modal,
     openModal,
     React,
@@ -25,11 +25,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 User accounts cannot post true rich embeds. EmbedForge sends via a webhook you control
                 (real embeds + link buttons) or falls back to a crafted markdown / ANSI-ish card in chat.
                 Use /embed or the toolbox builder.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     defaultWebhook: {
@@ -154,7 +154,7 @@ export async function forgeSend(opts: {
 
     const content = markdownCard(opts);
     await sendMessage(opts.channelId, { content });
-    showToast({ text: "EmbedForge: markdown card sent", variant: "info" });
+    showToast({ text: "EmbedForge: markdown card sent", variant: "default" });
 }
 
 function BuilderModal({ modalProps }: { modalProps: any; }) {
@@ -170,46 +170,40 @@ function BuilderModal({ modalProps }: { modalProps: any; }) {
     const [asMarkdown, setAsMarkdown] = useState(false);
 
     return (
-        <Modal.ModalRoot {...modalProps} size={Modal.ModalSize.MEDIUM}>
-            <Modal.ModalHeader>
-                <Forms.FormTitle tag="h2">EmbedForge builder</Forms.FormTitle>
-                <Modal.ModalCloseButton onClick={modalProps.onClose} />
-            </Modal.ModalHeader>
-            <Modal.ModalContent>
-                <Forms.FormText>Title</Forms.FormText>
-                <TextInput value={title} onChange={setTitle} />
-                <Forms.FormText>Description</Forms.FormText>
-                <TextInput value={description} onChange={setDescription} />
-                <Forms.FormText>URL / Color / Footer</Forms.FormText>
-                <TextInput value={url} onChange={setUrl} placeholder="https://..." />
-                <TextInput value={color} onChange={setColor} placeholder="#5865f2" />
-                <TextInput value={footer} onChange={setFooter} />
-                <Forms.FormText>Fields (name=value per line)</Forms.FormText>
-                <TextInput value={fields} onChange={setFields} />
-                <Forms.FormText>Link button (webhook only)</Forms.FormText>
-                <TextInput value={buttonLabel} onChange={setButtonLabel} placeholder="Label" />
-                <TextInput value={buttonUrl} onChange={setButtonUrl} placeholder="https://..." />
-                <Forms.FormText>Webhook override</Forms.FormText>
-                <TextInput value={webhook} onChange={setWebhook} />
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                    <Button onClick={async () => {
-                        try {
-                            await forgeSend({
-                                channelId: SelectedChannelStore.getChannelId(),
-                                title, description, url, color, footer, fields,
-                                buttonLabel, buttonUrl, webhook, asMarkdown
-                            });
-                            modalProps.onClose();
-                        } catch (e) {
-                            showToast({ text: String(e), variant: "critical" });
-                        }
-                    }}>Send</Button>
-                    <Button look={Button.Looks.OUTLINED} onClick={() => setAsMarkdown(v => !v)}>
-                        Mode: {asMarkdown ? "markdown card" : "webhook if set"}
-                    </Button>
-                </div>
-            </Modal.ModalContent>
-        </Modal.ModalRoot>
+        <Modal {...modalProps} title="EmbedForge builder" size="md">
+            <Paragraph>Title</Paragraph>
+            <TextInput value={title} onChange={setTitle} />
+            <Paragraph>Description</Paragraph>
+            <TextInput value={description} onChange={setDescription} />
+            <Paragraph>URL / Color / Footer</Paragraph>
+            <TextInput value={url} onChange={setUrl} placeholder="https://..." />
+            <TextInput value={color} onChange={setColor} placeholder="#5865f2" />
+            <TextInput value={footer} onChange={setFooter} />
+            <Paragraph>Fields (name=value per line)</Paragraph>
+            <TextInput value={fields} onChange={setFields} />
+            <Paragraph>Link button (webhook only)</Paragraph>
+            <TextInput value={buttonLabel} onChange={setButtonLabel} placeholder="Label" />
+            <TextInput value={buttonUrl} onChange={setButtonUrl} placeholder="https://..." />
+            <Paragraph>Webhook override</Paragraph>
+            <TextInput value={webhook} onChange={setWebhook} />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <Button onClick={async () => {
+                    try {
+                        await forgeSend({
+                            channelId: SelectedChannelStore.getChannelId(),
+                            title, description, url, color, footer, fields,
+                            buttonLabel, buttonUrl, webhook, asMarkdown
+                        });
+                        modalProps.onClose();
+                    } catch (e) {
+                        showToast({ text: String(e), variant: "critical" });
+                    }
+                }}>Send</Button>
+                <Button variant="secondary" onClick={() => setAsMarkdown(v => !v)}>
+                    Mode: {asMarkdown ? "markdown card" : "webhook if set"}
+                </Button>
+            </div>
+        </Modal>
     );
 }
 

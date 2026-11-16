@@ -6,11 +6,11 @@
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { showNotice } from "@api/Notices";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import {
-    Button,
     FluxDispatcher,
-    Forms,
     React,
     showToast,
     useEffect,
@@ -54,11 +54,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Scans incoming/edited messages for secret-like patterns. Alerts and full message
                 contents are saved <b>only locally</b> in DataStore for your review — nothing is uploaded.
                 Tune patterns below. Disable noisy ones (email) if needed.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     enabledPatterns: {
@@ -155,22 +155,21 @@ function AlertViewer() {
     return (
         <div>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <Button size={Button.Sizes.SMALL} onClick={refresh}>Refresh</Button>
+                <Button size="small" onClick={refresh}>Refresh</Button>
                 <Button
-                    size={Button.Sizes.SMALL}
-                    color={Button.Colors.RED}
-                    look={Button.Looks.OUTLINED}
+                    size="small"
+                    variant="dangerSecondary"
                     onClick={async () => {
                         await DataStore.set(LOG_KEY, []);
                         await refresh();
-                        showToast({ text: "SecretSentinel log cleared", variant: "info" });
+                        showToast({ text: "SecretSentinel log cleared", variant: "default" });
                     }}
                 >
                     Clear log
                 </Button>
                 <Button
-                    size={Button.Sizes.SMALL}
-                    look={Button.Looks.OUTLINED}
+                    size="small"
+                    variant="secondary"
                     onClick={async () => {
                         const data = JSON.stringify(await loadLog(), null, 2);
                         const bytes = new TextEncoder().encode(data);
@@ -185,16 +184,16 @@ function AlertViewer() {
                     Export JSON
                 </Button>
             </div>
-            {!log.length && <Forms.FormText>No alerts yet.</Forms.FormText>}
+            {!log.length && <Paragraph>No alerts yet.</Paragraph>}
             {log.slice(0, 50).map(a => (
                 <div key={a.id} style={{ padding: 8, marginBottom: 6, background: "var(--background-secondary)", borderRadius: 8 }}>
-                    <Forms.FormText style={{ fontSize: 12, opacity: 0.75 }}>
+                    <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
                         {new Date(a.ts).toLocaleString()} · {a.patternName} · {a.authorTag} · #{a.channelId}
-                    </Forms.FormText>
-                    <Forms.FormText><b>{a.reason}</b> → <code>{a.matched}</code></Forms.FormText>
-                    <Forms.FormText style={{ whiteSpace: "pre-wrap", userSelect: "text", fontSize: 12 }}>
+                    </Paragraph>
+                    <Paragraph><b>{a.reason}</b> → <code>{a.matched}</code></Paragraph>
+                    <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text", fontSize: 12 }}>
                         {a.content.slice(0, 800)}
-                    </Forms.FormText>
+                    </Paragraph>
                 </div>
             ))}
         </div>
@@ -236,7 +235,7 @@ function scanMessage(message: any) {
         void pushAlert(alert);
         const preview = settings.store.redactedPreview ? redact(matched) : matched;
         if (settings.store.toastOnHit) {
-            showToast({ text: `SecretSentinel: ${p.name} (${preview})`, variant: "warning" });
+            showToast({ text: `SecretSentinel: ${p.name} (${preview})`, variant: "critical" });
         }
         if (settings.store.noticeOnHit) {
             showNotice(`SecretSentinel hit: ${p.reason}`, "Dismiss", () => { });

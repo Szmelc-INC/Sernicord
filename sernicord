@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 PLUGINS_DIR="$ROOT/plugins"
 CLIENTS_DIR="$ROOT/clients"
 DEFAULT_PROFILE="sernicord"
@@ -29,6 +29,28 @@ ok()   { printf '%sOK%s  %s\n' "$GRN" "$RST" "$*"; }
 warn() { printf '%s!!%s  %s\n' "$YLW" "$RST" "$*" >&2; }
 die()  { printf '%sXX%s  %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+# Profile env overrides XDG_* for Discord only. Build tools (pnpm, node) must see
+# the host XDG dirs, or pnpm self-installs a second, broken copy under data/share.
+XDG_VARS=(XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME)
+for _v in "${XDG_VARS[@]}"; do
+  if [[ -n "${!_v+x}" ]]; then printf -v "HOST_$_v" '%s' "${!_v}"; fi
+done
+unset _v
+
+host_env() {
+  local v h
+  for v in "${XDG_VARS[@]}"; do
+    h="HOST_$v"
+    if [[ -n "${!h+x}" ]]; then export "$v=${!h}"; else unset "$v"; fi
+  done
+}
+
+# Run a build tool with the host environment
+host() { ( host_env; "$@" ); }
+
+# Build artifacts Discord loads at startup; a missing one crashes the main process
+DIST_FILES=(patcher.js preload.js renderer.js renderer.css)
 
 # ---------------------------------------------------------------------------
 # Target registry
@@ -116,7 +138,13 @@ ${BLD}Commands:${RST}
   launch               Launch isolated Discord for the profile
   fix                  Re-inject after Discord self-update / broken patch
   update               git pull target + deps + rebuild + reinject
-  doctor               Check toolchain, paths, injection, privacy fences
+  check                Scan plugins/ for removed target APIs + type-check them
+  rebuild              Stop watch, clean dist/, full build, verify, restart watch
+  repair               Fix pnpm, kill stale watchers, check, clean rebuild, reinject
+  reinstall            Uninject, wipe node_modules + dist, reinstall, rebuild, reinject
+  restart              Stop everything, then dev
+  logs [N]             Show the last N lines of the watch log (-f to follow)
+  doctor               Check toolchain, paths, build artifacts, injection, fences
   status               Show profiles, targets, watch/discord PIDs
   stop                 Stop watch + this profile's Discord
   profiles             List local profiles
@@ -134,10 +162,14 @@ ${BLD}Options:${RST}
   --no-watch           Skip starting file watch (dev/up)
   --prod               Production build instead of --dev
   -y, --yes            Assume yes for prompts
+  -f, --follow         Follow the log (logs)
 
 ${BLD}Examples:${RST}
   ./sernicord                      # full Sernicord dev (default)
   ./sernicord menu
+  ./sernicord repair               # "JavaScript error … dist/renderer.js" on start
+  ./sernicord check                # after a Vencord update broke a plugin
+  ./sernicord logs -f
   ./sernicord inject --profile alt
   ./sernicord update --target equicord
   ./sernicord fix --profile sernicord
@@ -163,6 +195,7 @@ NO_LAUNCH=0
 NO_WATCH=0
 PROD=0
 ASSUME_YES=0
+FOLLOW=0
 
 parse_args() {
   local positional=()
@@ -178,6 +211,7 @@ parse_args() {
       --no-watch) NO_WATCH=1; shift ;;
       --prod) PROD=1; shift ;;
       -y|--yes) ASSUME_YES=1; shift ;;
+      -f|--follow) FOLLOW=1; shift ;;
       --) shift; break ;;
       -*)
         die "Unknown option: $1 (try ./sernicord help)"
@@ -256,6 +290,7 @@ ensure_toolchain() {
   need git
   need node
   need pnpm
+  need rsync
   local major
   major=$(node -p "process.versions.node.split('.')[0]")
   if (( major < 18 )); then
@@ -282,8 +317,35 @@ ensure_deps() {
   src=$(target_src "$TARGET")
   if [[ ! -d "$src/node_modules" ]]; then
     info "Installing $TARGET dependencies (pnpm)..."
-    (cd "$src" && pnpm install --frozen-lockfile || pnpm install)
+    (cd "$src" && host pnpm install --frozen-lockfile || host pnpm install)
   fi
+}
+
+# pnpm >= 11 ships a native binary that its install.js links in place of a
+# placeholder script. When pnpm self-switches to the packageManager version and
+# that step is skipped, every pnpm call fails with ENOEXEC.
+repair_pnpm() {
+  local src want base dir pkg
+  src=$(target_src "$TARGET")
+  want=$(node -p "(require('$src/package.json').packageManager || '').replace(/^pnpm@/, '')" 2>/dev/null || true)
+  [[ -n "$want" ]] || return 0
+  base="${HOST_XDG_DATA_HOME:-$HOME/.local/share}/pnpm/.tools/pnpm"
+  for dir in "$base/$want" "$base/$want"_tmp_*; do
+    pkg="$dir/node_modules/pnpm"
+    [[ -f "$pkg/install.js" && -f "$pkg/pnpm" ]] || continue
+    if [[ "$(head -c 2 "$pkg/pnpm")" == "#!" ]] || [[ "$(head -c 4 "$pkg/pnpm" | od -An -c | tr -d ' ')" == "177ELF" ]]; then
+      continue
+    fi
+    info "Linking native pnpm binary in $dir"
+    (cd "$pkg" && node install.js) || warn "pnpm install.js failed in $dir"
+  done
+  # Copies created under a profile's XDG_DATA_HOME by older sernicord versions
+  if compgen -G "$ROOT/data/share/pnpm" >/dev/null || compgen -G "$ROOT/data/profiles/*/share/pnpm" >/dev/null; then
+    info "Removing profile-scoped pnpm copies"
+    rm -rf "$ROOT/data/share/pnpm" "$ROOT"/data/profiles/*/share/pnpm
+  fi
+  (cd "$src" && host pnpm -v >/dev/null 2>&1) || die "pnpm still fails in $src — run: cd $src && pnpm -v"
+  ok "pnpm $(cd "$src" && host pnpm -v)"
 }
 
 ensure_discord_bootstrap() {
@@ -408,8 +470,68 @@ build_target() {
     info "Building $TARGET (dev)..."
     args+=(--dev)
   fi
-  (cd "$src" && pnpm "${args[@]}")
+  # esbuild drops the bundles whose plugins fail to compile, so check the files
+  # as well as the exit code
+  local rc=0
+  (cd "$src" && host pnpm "${args[@]}") || rc=$?
+  (( rc == 0 )) || die "Build failed (exit $rc). Run: ./sernicord check"
+  dist_complete || die "Build incomplete — missing: $(dist_missing). Run: ./sernicord check"
   ok "Build finished"
+}
+
+dist_missing() {
+  local src f out=()
+  src=$(target_src "$TARGET")
+  for f in "${DIST_FILES[@]}"; do
+    [[ -s "$src/dist/$f" ]] || out+=("dist/$f")
+  done
+  echo "${out[*]}"
+}
+
+dist_complete() {
+  [[ -z "$(dist_missing)" ]]
+}
+
+# Removed APIs that still compile in some contexts but break at runtime
+STALE_API_PATTERNS=(
+  'Forms\.Form(Text|Title|Section|Divider|Label)::use Paragraph / Heading from @components'
+  'Button\.(Looks|Colors|Sizes)::use <Button variant= size=> from @components/Button'
+  'Modal\.Modal(Root|Header|Content|Footer|CloseButton|Size)::use <Modal title=> from @webpack/common'
+  'variant: "(info|warning)"::toast variants are default | success | critical'
+)
+
+# Static scan + TypeScript check of plugins/ against the target's current API
+cmd_check() {
+  local src entry pat hint hits fails=0 out
+  ensure_toolchain
+  ensure_target_clone
+  ensure_deps
+  src=$(target_src "$TARGET")
+  info "Scanning plugins/ for removed $TARGET APIs"
+  for entry in "${STALE_API_PATTERNS[@]}"; do
+    pat="${entry%%::*}"; hint="${entry#*::}"
+    hits=$(grep -rnE "$pat" "$PLUGINS_DIR" --include='*.ts' --include='*.tsx' || true)
+    if [[ -n "$hits" ]]; then
+      warn "$hint"
+      printf '%s\n' "$hits" | sed "s|^$PLUGINS_DIR/|      plugins/|" >&2
+      fails=$((fails + 1))
+    fi
+  done
+  sync_plugins
+  info "Type-checking userplugins (tsc --noEmit)"
+  out=$(cd "$src" && host pnpm exec tsc --noEmit 2>&1 | grep 'src/userplugins/' || true)
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out" | sed 's|^src/userplugins/|      plugins/|' >&2
+    warn "$(printf '%s\n' "$out" | grep -c 'error TS') TypeScript error(s) in plugins"
+    fails=$((fails + 1))
+  else
+    ok "No TypeScript errors in plugins"
+  fi
+  if (( fails )); then
+    warn "check found problems — fix them before building"
+    return 1
+  fi
+  ok "Plugins match the $TARGET API"
 }
 
 inject_target() {
@@ -422,7 +544,7 @@ inject_target() {
   fi
   ensure_deps
   ensure_client
-  if [[ ! -f "$src/dist/patcher.js" ]]; then
+  if ! dist_complete; then
     build_target
   else
     sync_plugins
@@ -430,9 +552,9 @@ inject_target() {
   info "Injecting $TARGET into $cfg"
   # Call installer directly so --location is honored (pnpm inject inserts a stray --)
   if [[ -f "$src/scripts/runInstaller.mjs" ]]; then
-    (cd "$src" && node scripts/runInstaller.mjs -- --install --location "$cfg")
+    (cd "$src" && host node scripts/runInstaller.mjs -- --install --location "$cfg")
   else
-    (cd "$src" && pnpm inject -- --location "$cfg") || \
+    (cd "$src" && host pnpm inject -- --location "$cfg") || \
       die "Injector failed. Try: ./sernicord doctor"
   fi
   ok "Injected"
@@ -449,9 +571,9 @@ uninject_target() {
   ensure_deps
   info "Uninjecting $TARGET from $cfg"
   if [[ -f "$src/scripts/runInstaller.mjs" ]]; then
-    (cd "$src" && node scripts/runInstaller.mjs -- --uninstall --location "$cfg")
+    (cd "$src" && host node scripts/runInstaller.mjs -- --uninstall --location "$cfg")
   else
-    (cd "$src" && pnpm uninject -- --location "$cfg") || true
+    (cd "$src" && host pnpm uninject -- --location "$cfg") || true
   fi
   ok "Uninjected"
 }
@@ -479,25 +601,32 @@ start_watch() {
   info "Starting pnpm watch → $log"
   (
     cd "$src"
-    nohup pnpm watch >> "$log" 2>&1 < /dev/null &
+    host_env; nohup pnpm watch >> "$log" 2>&1 < /dev/null &
     echo $! > "$f"
   )
   ok "Watch pid $(cat "$f")"
 }
 
-stop_all() {
-  local f pid cfg
+stop_watch() {
+  local f pid
   f=$(watch_pid_file)
   if watch_running; then
     pid=$(cat "$f")
-    kill "$pid" 2>/dev/null || true
     pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
     rm -f "$f"
     ok "Watch stopped"
   else
     rm -f "$f" 2>/dev/null || true
     info "Watch not running"
   fi
+  # pnpm → pnpm → node: the build process is a grandchild of the recorded pid
+  kill_orphan_watch
+}
+
+stop_all() {
+  local cfg
+  stop_watch
   cfg=$(discord_config)
   if pgrep -f "$cfg" >/dev/null 2>&1; then
     pkill -f "$cfg" || true
@@ -522,6 +651,7 @@ launch_discord() {
   launch=$(launcher_bin)
   cfg=$(discord_config)
   [[ -x "$launch" ]] || die "Missing launcher: $launch"
+  dist_complete || die "Refusing to launch: $TARGET build is incomplete (missing $(dist_missing)). Run: ./sernicord repair"
   info "Launching isolated Discord"
   info "Profile: $PROFILE"
   info "Config:  $cfg"
@@ -552,7 +682,7 @@ cmd_dev() {
   ensure_target_clone
   ensure_deps
   sync_plugins
-  if [[ ! -f "$(target_src "$TARGET")/dist/patcher.js" ]] || (( PROD )); then
+  if ! dist_complete || (( PROD )); then
     build_target
   else
     info "dist/ present — skipping full rebuild (run ./sernicord build to force)"
@@ -578,7 +708,7 @@ cmd_update() {
   src=$(target_src "$TARGET")
   info "Updating $TARGET (git pull)..."
   (cd "$src" && git pull --ff-only || git pull --rebase || warn "git pull had issues — continuing")
-  (cd "$src" && pnpm install)
+  (cd "$src" && host pnpm install)
   sync_plugins
   build_target
   inject_target
@@ -595,6 +725,76 @@ cmd_fix() {
   build_target
   inject_target
   ok "Fixed. Restart Discord or ./sernicord launch"
+}
+
+# Kill watchers of this target that lost their pid file (they keep rewriting dist/)
+kill_orphan_watch() {
+  local src pid
+  src=$(realpath "$(target_src "$TARGET")")
+  for pid in $(pgrep -f 'scripts/build/build.mjs --watch' || true); do
+    [[ "$(realpath "/proc/$pid/cwd" 2>/dev/null)" == "$src" ]] || continue
+    kill "$pid" 2>/dev/null && ok "Killed orphan watch pid $pid"
+  done
+}
+
+cmd_rebuild() {
+  local was_watching=0
+  ensure_toolchain
+  ensure_target_clone
+  watch_running && was_watching=1
+  stop_watch
+  cmd_clean_build
+  build_target
+  (( was_watching )) && start_watch
+  ok "Rebuilt $TARGET (${DIST_FILES[*]})"
+}
+
+cmd_repair() {
+  local was_watching=0
+  info "Repair: toolchain → stale processes → plugin check → clean build → reinject"
+  ensure_toolchain
+  ensure_target_clone
+  repair_pnpm
+  watch_running && was_watching=1
+  stop_watch
+  apply_profile_env
+  clear_stale_singleton
+  ensure_deps
+  cmd_check || warn "Continuing; the build below fails if these errors are fatal"
+  cmd_clean_build
+  build_target
+  inject_target
+  (( was_watching )) && start_watch
+  ok "Repaired. Restart Discord or run ./sernicord launch"
+}
+
+cmd_reinstall() {
+  local src
+  src=$(target_src "$TARGET")
+  confirm "Reinstall $TARGET: stop, uninject, delete node_modules + dist, reinstall deps, rebuild, reinject?" || die "Aborted"
+  ensure_toolchain
+  ensure_target_clone
+  apply_profile_env
+  stop_all
+  is_patched && uninject_target
+  info "Removing $src/node_modules and $src/dist"
+  rm -rf "$src/node_modules" "$src/dist"
+  repair_pnpm
+  ensure_deps
+  build_target
+  inject_target
+  ok "Reinstalled $TARGET for profile '$PROFILE'"
+}
+
+cmd_logs() {
+  local log
+  log=$(watch_log_file)
+  [[ -f "$log" ]] || die "No watch log yet: $log"
+  if (( FOLLOW )); then
+    tail -n 50 -f "$log"
+  else
+    tail -n "${CMD_ARG:-80}" "$log"
+  fi
 }
 
 cmd_doctor() {
@@ -624,7 +824,22 @@ cmd_doctor() {
     issues=$((issues + 1))
   fi
   if [[ -d "$src/node_modules" ]]; then ok "node_modules present"; else warn "no node_modules"; issues=$((issues+1)); fi
-  if [[ -f "$src/dist/patcher.js" ]]; then ok "dist/patcher.js present"; else warn "no dist — run build"; issues=$((issues+1)); fi
+  if dist_complete; then
+    ok "dist complete (${DIST_FILES[*]})"
+  else
+    warn "dist incomplete, missing: $(dist_missing) — run ./sernicord repair"
+    issues=$((issues+1))
+  fi
+  if (cd "$src" 2>/dev/null && host pnpm -v >/dev/null 2>&1); then
+    ok "pnpm works in target ($(cd "$src" && host pnpm -v))"
+  else
+    warn "pnpm fails in $src — run ./sernicord repair"
+    issues=$((issues+1))
+  fi
+  if watch_running && [[ -f "$(watch_log_file)" ]] && tail -n 40 "$(watch_log_file)" | grep -q '\[ERROR\]'; then
+    warn "watch log has build errors — run ./sernicord logs"
+    issues=$((issues+1))
+  fi
 
   local plug_count=0
   for d in "$PLUGINS_DIR"/*/; do [[ -d "$d" ]] && plug_count=$((plug_count+1)); done
@@ -755,6 +970,9 @@ ${BLD}${MAG}Sernicord${RST}  target=${CYN}$TARGET${RST}  profile=${CYN}$PROFILE$
   4) Build                               10) Status
   5) Inject                              11) Stop
   6) Launch                              12) Switch target/profile
+  13) Check plugins                      15) Repair (full)
+  14) Rebuild (clean)                    16) Reinstall deps
+  17) Watch log
   0) Quit
 EOF
     local choice
@@ -779,6 +997,11 @@ EOF
         [[ -n "${p:-}" ]] && PROFILE="$p"
         [[ -n "${c:-}" ]] && CHANNEL="$c"
         ;;
+      13) cmd_check || true ;;
+      14) cmd_rebuild || true ;;
+      15) cmd_repair || true ;;
+      16) cmd_reinstall || true ;;
+      17) cmd_logs || true ;;
       0|q|Q) exit 0 ;;
       *) warn "Unknown choice" ;;
     esac
@@ -819,6 +1042,12 @@ main() {
     uninject) ensure_toolchain; apply_profile_env; ensure_target_clone; uninject_target ;;
     launch) ensure_toolchain; apply_profile_env; launch_discord ;;
     fix) cmd_fix ;;
+    check) cmd_check ;;
+    rebuild) cmd_rebuild ;;
+    repair) cmd_repair ;;
+    reinstall) cmd_reinstall ;;
+    restart) ensure_toolchain; apply_profile_env; stop_all; cmd_dev ;;
+    logs|log) cmd_logs ;;
     update) cmd_update ;;
     doctor) cmd_doctor ;;
     status) cmd_status ;;

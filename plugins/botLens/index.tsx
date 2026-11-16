@@ -5,10 +5,11 @@
 
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Heading } from "@components/Heading";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import {
-    Button,
-    Forms,
     Modal,
     openModal,
     React,
@@ -26,11 +27,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Opens a read-oriented Bot Lens panel that calls the Discord API with a <b>bot</b> token.
                 It does <b>not</b> replace your logged-in user session. Self-botting / user-token abuse is
                 out of scope and blocked. Keep tokens out of cloud sync and public repos. Discord ToS still applies.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     botToken: {
@@ -138,72 +139,66 @@ function BotLensModal({ modalProps }: { modalProps: any; }) {
     }, []);
 
     return (
-        <Modal.ModalRoot {...modalProps} size={Modal.ModalSize.LARGE}>
-            <Modal.ModalHeader>
-                <Forms.FormTitle tag="h2">BotLens</Forms.FormTitle>
-                <Modal.ModalCloseButton onClick={modalProps.onClose} />
-            </Modal.ModalHeader>
-            <Modal.ModalContent>
-                <Forms.FormText style={{ marginBottom: 8 }}>
-                    Separate bot API browser. Your normal Discord account stays untouched.
-                </Forms.FormText>
-                <TextInput
-                    type="password"
-                    value={token}
-                    placeholder="Bot token"
-                    onChange={setToken}
-                />
-                <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 12 }}>
-                    <Button disabled={busy} onClick={connect}>Connect</Button>
-                    {me && <Forms.FormText>@{me.username} ({me.id}) bot={String(me.bot)}</Forms.FormText>}
-                </div>
-                {error && <Forms.FormText style={{ color: "var(--status-danger)" }}>{error}</Forms.FormText>}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 8, minHeight: 360 }}>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Guilds</Forms.FormTitle>
-                        {guilds.map(g => (
-                            <Button
-                                key={g.id}
-                                size={Button.Sizes.SMALL}
-                                look={guildId === g.id ? Button.Looks.FILLED : Button.Looks.LINK}
-                                style={{ display: "block", width: "100%", textAlign: "left" }}
-                                onClick={() => loadChannels(g.id)}
-                            >
-                                {g.name}
-                            </Button>
-                        ))}
-                    </ScrollerThin>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Channels</Forms.FormTitle>
-                        {channels.map(c => (
-                            <Button
-                                key={c.id}
-                                size={Button.Sizes.SMALL}
-                                look={channelId === c.id ? Button.Looks.FILLED : Button.Looks.LINK}
-                                style={{ display: "block", width: "100%", textAlign: "left" }}
-                                onClick={() => loadMessages(c.id)}
-                            >
-                                #{c.name}
-                            </Button>
-                        ))}
-                    </ScrollerThin>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Messages</Forms.FormTitle>
-                        {messages.map(m => (
-                            <div key={m.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--background-modifier-accent)" }}>
-                                <Forms.FormText style={{ fontSize: 12, opacity: 0.7 }}>
-                                    {m.author?.username} · {m.timestamp}
-                                </Forms.FormText>
-                                <Forms.FormText style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
-                                    {m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : "[empty/embed]")}
-                                </Forms.FormText>
-                            </div>
-                        ))}
-                        {!messages.length && <Forms.FormText>Select a channel.</Forms.FormText>}
-                    </ScrollerThin>
-                </div>
-            </Modal.ModalContent>
-        </Modal.ModalRoot>
+        <Modal {...modalProps} title="BotLens" size="lg">
+            <Paragraph style={{ marginBottom: 8 }}>
+                Separate bot API browser. Your normal Discord account stays untouched.
+            </Paragraph>
+            <TextInput
+                type="password"
+                value={token}
+                placeholder="Bot token"
+                onChange={setToken}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 12 }}>
+                <Button disabled={busy} onClick={connect}>Connect</Button>
+                {me && <Paragraph>@{me.username} ({me.id}) bot={String(me.bot)}</Paragraph>}
+            </div>
+            {error && <Paragraph style={{ color: "var(--status-danger)" }}>{error}</Paragraph>}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 8, minHeight: 360 }}>
+                <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
+                    <Heading tag="h5">Guilds</Heading>
+                    {guilds.map(g => (
+                        <Button
+                            key={g.id}
+                            size="small"
+                            variant={guildId === g.id ? "primary" : "secondary"}
+                            style={{ display: "block", width: "100%", textAlign: "left" }}
+                            onClick={() => loadChannels(g.id)}
+                        >
+                            {g.name}
+                        </Button>
+                    ))}
+                </ScrollerThin>
+                <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
+                    <Heading tag="h5">Channels</Heading>
+                    {channels.map(c => (
+                        <Button
+                            key={c.id}
+                            size="small"
+                            variant={channelId === c.id ? "primary" : "secondary"}
+                            style={{ display: "block", width: "100%", textAlign: "left" }}
+                            onClick={() => loadMessages(c.id)}
+                        >
+                            #{c.name}
+                        </Button>
+                    ))}
+                </ScrollerThin>
+                <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
+                    <Heading tag="h5">Messages</Heading>
+                    {messages.map(m => (
+                        <div key={m.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--background-modifier-accent)" }}>
+                            <Paragraph style={{ fontSize: 12, opacity: 0.7 }}>
+                                {m.author?.username} · {m.timestamp}
+                            </Paragraph>
+                            <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
+                                {m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : "[empty/embed]")}
+                            </Paragraph>
+                        </div>
+                    ))}
+                    {!messages.length && <Paragraph>Select a channel.</Paragraph>}
+                </ScrollerThin>
+            </div>
+        </Modal>
     );
 }
 
