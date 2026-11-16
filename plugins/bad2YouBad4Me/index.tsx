@@ -7,7 +7,7 @@ import { ApplicationCommandInputType, ApplicationCommandOptionType, sendBotMessa
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { HeadingTertiary } from "@components/Heading";
+import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { saveFile } from "@utils/web";
@@ -613,7 +613,7 @@ function LaundryPanel() {
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <HeadingTertiary>Laundry day</HeadingTertiary>
+            <Heading tag="h4">Laundry day</Heading>
             <Paragraph>
                 Washes only your own messages. Start with dry run on, read the counts, then turn it off.
                 Every real edit is logged locally so it can be undone.

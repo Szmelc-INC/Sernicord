@@ -12,7 +12,7 @@ import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { HeadingTertiary } from "@components/Heading";
+import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { copyWithToast } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
@@ -597,7 +597,7 @@ function ScanPanel() {
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <HeadingTertiary>Scan</HeadingTertiary>
+            <Heading tag="h4">Scan</Heading>
             <Paragraph>
                 User ID to scan (empty = every author; only for a channel or one server). Right-click a user,
                 message or server for the same actions.
