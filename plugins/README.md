@@ -24,6 +24,7 @@ Bundled plugins:
 | `secretSentinel` | Local-only watcher for tokens/keys/emails + custom patterns |
 | `megaDrop` | Huge files via bashupload or peer chunk threads |
 | `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: LLM dark-comedy wordsmith (OpenAI-compatible/local or Anthropic) + keyword swaps for your own messages; bulk rewrite / purge / fixed-text replace by keyword list or LLM flag (channel / server / DMs / everywhere), dry run, undo log, ZIP backup |
+| `fullCyberJacket` | Hate-speech / threat / self-harm / extremism finder for a user (every shared server + DMs), a server or a channel; beats leet, homoglyphs, spacing, zero-width; group words only count next to an aggravator; review modal with jump links, ZIP export, optional webhook digest. Never calls the report API |
 
 Local-only experiments can live directly under a cloned target’s `src/userplugins/`;
 only what you put here is meant for the public Sernicord repo.
