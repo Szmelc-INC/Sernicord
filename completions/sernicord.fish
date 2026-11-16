@@ -1,5 +1,5 @@
 # fish completion for sernicord
-set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update doctor status stop profiles clean-build completion version help
+set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update check rebuild repair reinstall restart logs doctor status stop profiles clean-build completion version help
 
 complete -c sernicord -f
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a dev -d 'Build, sync, inject, watch, launch (default)'
@@ -14,6 +14,12 @@ complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a uninject -d 
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a launch -d 'Launch isolated Discord'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a fix -d 'Re-inject after Discord update'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a update -d 'Pull, deps, rebuild, reinject'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a check -d 'Scan + type-check plugins against target API'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a rebuild -d 'Clean dist, full build, verify'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a repair -d 'Fix pnpm, stale watch, rebuild, reinject'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a reinstall -d 'Wipe deps + dist, reinstall, rebuild, reinject'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a restart -d 'Stop everything, then dev'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a logs -d 'Show the watch log'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a doctor -d 'Check toolchain and fences'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a status -d 'Show profiles and PIDs'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a stop -d 'Stop watch and Discord'
@@ -32,5 +38,6 @@ complete -c sernicord -l no-launch -d 'Skip launching Discord'
 complete -c sernicord -l no-watch -d 'Skip file watch'
 complete -c sernicord -l prod -d 'Production build'
 complete -c sernicord -s y -l yes -d 'Assume yes'
+complete -c sernicord -s f -l follow -d 'Follow the log (logs)'
 complete -c sernicord -s h -l help -d 'Show help'
 complete -c sernicord -s V -l version -d 'Print version'
