@@ -72,8 +72,11 @@ Then:
 | `logs [N]` / `logs -f` | Tail or follow the watch log |
 | `doctor` | Toolchain, paths, build artifacts, pnpm, injection, privacy fences |
 | `status` / `stop` / `profiles` | Inspect or shut down |
+| `backup [out.zip]` | Zip configs, themes, QuickCSS, plugins + Discord session (`--full` adds caches, `--plugins-only` just `plugins/`) |
+| `restore <file.zip>` | Restore a backup into the current profile (`--plugins-only` / `--data-only`) |
+| `scan` | Find other Discord/Vencord/Vesktop/BetterDiscord traces on the system; import settings/themes/quickcss/cache/plugins with `--import … --from <dir>` |
 
-Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `-y`, `-f`, `--system` (dangerous).
+Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `--no-color`, `--full`, `--plugins-only`, `--data-only`, `--import`, `--from`, `-y`, `-f`, `--system` (dangerous). Output is colored (Szmelc palette) and honors `NO_COLOR`/`--no-color`.
 
 ### Troubleshooting
 
@@ -93,6 +96,10 @@ Examples:
 ./sernicord repair
 ./sernicord check
 ./sernicord doctor
+./sernicord backup                 # → data/backups/sernicord-backup-<date>.zip
+./sernicord restore data/backups/sernicord-backup-<date>.zip
+./sernicord scan                   # what other Discord/Vencord data lives here?
+./sernicord scan --import themes --from ~/.config/Vencord
 ```
 
 `./dev.sh` remains a thin wrapper around `./sernicord`.
@@ -150,6 +157,9 @@ Bundled plugins:
 | `megaDrop` | Large files via bashupload or chunk threads |
 | `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: soften your own messages (keywords + optional LLM), live or bulk |
 | `fullCyberJacket` | Finds hate speech, threats, self-harm encouragement and extremist slogans (leet / look-alike / spacing aware) in a user's or server's messages for **manual** review and reporting; never reports by itself |
+| `szmelc` | Szmelc™ — OG szmelc mode for the whole client + the "szmelc" tab in Vencord settings with all our plugins and themes |
+| `discloudStorage` | Turns a server into your private cloud storage (you + your bots + backups) |
+| `allMyGifs` | Bulk favorite-gif manager: dump all to a channel (URLs or files) and suck a channel's gifs into favorites |
 
 Upstream Vencord gitignores `src/userplugins`; Sernicord keeps the publishable copies here instead.
 
