@@ -5,16 +5,11 @@
 
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings, PlainSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Heading } from "@components/Heading";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
-import {
-    Button,
-    Forms,
-    React,
-    showToast,
-    TextInput,
-    useEffect,
-    useState
-} from "@webpack/common";
+import { React, showToast, TextInput, useEffect, useState } from "@webpack/common";
 
 const Author = { name: "sernik", id: 0n };
 const STORE_KEY = "SernicordProfileVault";
@@ -136,7 +131,7 @@ function VaultPanel() {
         v.entries = v.entries.filter(x => x.name !== entry.name);
         await saveVault(v);
         await refresh();
-        showToast({ text: `Deleted "${entry.name}"`, variant: "info" });
+        showToast({ text: `Deleted "${entry.name}"`, variant: "default" });
     };
 
     const exportOne = async (entry: VaultEntry) => {
@@ -155,18 +150,18 @@ function VaultPanel() {
 
     return (
         <div>
-            <Forms.FormText style={{ marginBottom: 8 }}>
+            <Paragraph style={{ marginBottom: 8 }}>
                 Snapshots include plugin enablement, plugin settings, themes, theme links, and QuickCSS.
                 Profiles stay in local DataStore (not cloud). Reload Discord after switching.
-            </Forms.FormText>
+            </Paragraph>
             <TextInput placeholder="Profile name" value={name} onChange={setName} />
             <div style={{ height: 8 }} />
             <TextInput placeholder="Optional note" value={note} onChange={setNote} />
             <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 16 }}>
                 <Button disabled={busy} onClick={() => saveAs(false)}>Save / Update</Button>
-                <Button disabled={busy} color={Button.Colors.GREEN} onClick={() => saveAs(true)}>Save as Favorite</Button>
+                <Button variant="positive" disabled={busy} onClick={() => saveAs(true)}>Save as Favorite</Button>
             </div>
-            {sorted.length === 0 && <Forms.FormText>No profiles yet.</Forms.FormText>}
+            {sorted.length === 0 && <Paragraph>No profiles yet.</Paragraph>}
             {sorted.map(entry => (
                 <div
                     key={entry.name}
@@ -178,20 +173,20 @@ function VaultPanel() {
                         border: entry.favorite ? "1px solid var(--status-positive)" : "1px solid transparent"
                     }}
                 >
-                    <Forms.FormTitle tag="h5" style={{ margin: 0 }}>
+                    <Heading tag="h5" style={{ margin: 0 }}>
                         {entry.favorite ? "★ " : ""}{entry.name}
-                    </Forms.FormTitle>
-                    <Forms.FormText style={{ fontSize: 12, opacity: 0.75 }}>
+                    </Heading>
+                    <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
                         updated {new Date(entry.updatedAt).toLocaleString()}
                         {entry.note ? ` — ${entry.note}` : ""}
-                    </Forms.FormText>
+                    </Paragraph>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                        <Button size={Button.Sizes.SMALL} disabled={busy} onClick={() => activate(entry)}>Switch</Button>
-                        <Button size={Button.Sizes.SMALL} look={Button.Looks.OUTLINED} onClick={() => toggleFav(entry)}>
+                        <Button size="small" disabled={busy} onClick={() => activate(entry)}>Switch</Button>
+                        <Button size="small" variant="secondary" onClick={() => toggleFav(entry)}>
                             {entry.favorite ? "Unfavorite" : "Favorite"}
                         </Button>
-                        <Button size={Button.Sizes.SMALL} look={Button.Looks.OUTLINED} onClick={() => exportOne(entry)}>Export</Button>
-                        <Button size={Button.Sizes.SMALL} color={Button.Colors.RED} look={Button.Looks.OUTLINED} onClick={() => remove(entry)}>Delete</Button>
+                        <Button size="small" variant="secondary" onClick={() => exportOne(entry)}>Export</Button>
+                        <Button variant="dangerSecondary" size="small" onClick={() => remove(entry)}>Delete</Button>
                     </div>
                 </div>
             ))}

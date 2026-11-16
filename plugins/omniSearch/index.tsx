@@ -4,26 +4,12 @@
  */
 
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
-import { Settings, definePluginSettings } from "@api/Settings";
+import { definePluginSettings,Settings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
-import {
-    Button,
-    ChannelRouter,
-    ChannelStore,
-    Forms,
-    GuildStore,
-    MessageStore,
-    Modal,
-    NavigationRouter,
-    openModal,
-    openUserProfileModal,
-    RelationshipStore,
-    showToast,
-    TextInput,
-    useMemo,
-    UserStore,
-    useState
-} from "@webpack/common";
+import { RenderModalProps } from "@vencord/discord-types";
+import { ChannelRouter, ChannelStore, GuildStore, MessageStore, Modal, NavigationRouter, openModal, openUserProfileModal, RelationshipStore, showToast, TextInput, useMemo, UserStore, useState } from "@webpack/common";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -31,10 +17,10 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Run <code>/omnisearch</code> or use the Vencord toolbox. Searches loaded messages,
                 channels, DMs, friends, servers, plugins, and setting keys in the client.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     maxResults: {
@@ -171,7 +157,7 @@ function collect(query: string): Hit[] {
                     s,
                     action: () => showToast({
                         text: `${name}: ${p.started ? "running" : "stopped"} — open Vencord settings → Plugins`,
-                        variant: "info"
+                        variant: "default"
                     })
                 });
             }
@@ -190,7 +176,7 @@ function collect(query: string): Hit[] {
                     title: p,
                     subtitle: typeof v === "object" ? "{…}" : String(v).slice(0, 80),
                     s: s - 10,
-                    action: () => showToast({ text: `Setting: ${p}`, variant: "info" })
+                    action: () => showToast({ text: `Setting: ${p}`, variant: "default" })
                 });
                 if (typeof v === "object") walk(v, p, depth + 1);
             }
@@ -211,17 +197,13 @@ function collect(query: string): Hit[] {
     return out;
 }
 
-function OmniModal({ modalProps }: { modalProps: any; }) {
+function OmniModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [q, setQ] = useState("");
     const results = useMemo(() => (q.trim().length >= 2 ? collect(q) : []), [q]);
 
     return (
-        <Modal.ModalRoot {...modalProps} size={Modal.ModalSize.MEDIUM}>
-            <Modal.ModalHeader>
-                <Forms.FormTitle tag="h2">OmniSearch</Forms.FormTitle>
-                <Modal.ModalCloseButton onClick={modalProps.onClose} />
-            </Modal.ModalHeader>
-            <Modal.ModalContent>
+        <Modal {...modalProps} size="md" title="OmniSearch">
+            <div>
                 <TextInput
                     value={q}
                     placeholder="Search everywhere…"
@@ -229,11 +211,11 @@ function OmniModal({ modalProps }: { modalProps: any; }) {
                     autoFocus
                 />
                 <div style={{ marginTop: 12, maxHeight: 420, overflow: "auto" }}>
-                    {q.trim().length < 2 && <Forms.FormText>Type at least 2 characters.</Forms.FormText>}
+                    {q.trim().length < 2 && <Paragraph>Type at least 2 characters.</Paragraph>}
                     {results.map((r, i) => (
                         <Button
                             key={i}
-                            look={Button.Looks.LINK}
+                            variant="secondary"
                             style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
                             onClick={() => {
                                 r.action();
@@ -245,11 +227,11 @@ function OmniModal({ modalProps }: { modalProps: any; }) {
                         </Button>
                     ))}
                     {q.trim().length >= 2 && results.length === 0 && (
-                        <Forms.FormText>No hits in currently loaded client data.</Forms.FormText>
+                        <Paragraph>No hits in currently loaded client data.</Paragraph>
                     )}
                 </div>
-            </Modal.ModalContent>
-        </Modal.ModalRoot>
+            </div>
+        </Modal>
     );
 }
 

@@ -5,19 +5,12 @@
 
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Heading } from "@components/Heading";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
-import {
-    Button,
-    Forms,
-    Modal,
-    openModal,
-    React,
-    ScrollerThin,
-    showToast,
-    TextInput,
-    useEffect,
-    useState
-} from "@webpack/common";
+import { RenderModalProps } from "@vencord/discord-types";
+import { Modal, openModal, React, ScrollerThin, showToast, TextInput, useEffect, useState } from "@webpack/common";
 
 const Author = { name: "sernik", id: 0n };
 const API = "https://discord.com/api/v10";
@@ -26,11 +19,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Opens a read-oriented Bot Lens panel that calls the Discord API with a <b>bot</b> token.
                 It does <b>not</b> replace your logged-in user session. Self-botting / user-token abuse is
                 out of scope and blocked. Keep tokens out of cloud sync and public repos. Discord ToS still applies.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     botToken: {
@@ -65,7 +58,7 @@ async function botFetch(path: string, token: string, init: RequestInit = {}) {
     return res.json();
 }
 
-function BotLensModal({ modalProps }: { modalProps: any; }) {
+function BotLensModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [token, setToken] = useState(settings.store.botToken || "");
     const [me, setMe] = useState<any>(null);
     const [guilds, setGuilds] = useState<any[]>([]);
@@ -138,15 +131,11 @@ function BotLensModal({ modalProps }: { modalProps: any; }) {
     }, []);
 
     return (
-        <Modal.ModalRoot {...modalProps} size={Modal.ModalSize.LARGE}>
-            <Modal.ModalHeader>
-                <Forms.FormTitle tag="h2">BotLens</Forms.FormTitle>
-                <Modal.ModalCloseButton onClick={modalProps.onClose} />
-            </Modal.ModalHeader>
-            <Modal.ModalContent>
-                <Forms.FormText style={{ marginBottom: 8 }}>
+        <Modal {...modalProps} size="lg" title="BotLens">
+            <div>
+                <Paragraph style={{ marginBottom: 8 }}>
                     Separate bot API browser. Your normal Discord account stays untouched.
-                </Forms.FormText>
+                </Paragraph>
                 <TextInput
                     type="password"
                     value={token}
@@ -155,17 +144,17 @@ function BotLensModal({ modalProps }: { modalProps: any; }) {
                 />
                 <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 12 }}>
                     <Button disabled={busy} onClick={connect}>Connect</Button>
-                    {me && <Forms.FormText>@{me.username} ({me.id}) bot={String(me.bot)}</Forms.FormText>}
+                    {me && <Paragraph>@{me.username} ({me.id}) bot={String(me.bot)}</Paragraph>}
                 </div>
-                {error && <Forms.FormText style={{ color: "var(--status-danger)" }}>{error}</Forms.FormText>}
+                {error && <Paragraph style={{ color: "var(--status-danger)" }}>{error}</Paragraph>}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 8, minHeight: 360 }}>
                     <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Guilds</Forms.FormTitle>
+                        <Heading tag="h5">Guilds</Heading>
                         {guilds.map(g => (
                             <Button
                                 key={g.id}
-                                size={Button.Sizes.SMALL}
-                                look={guildId === g.id ? Button.Looks.FILLED : Button.Looks.LINK}
+                                size="small"
+                                variant={guildId === g.id ? "primary" : "secondary"}
                                 style={{ display: "block", width: "100%", textAlign: "left" }}
                                 onClick={() => loadChannels(g.id)}
                             >
@@ -174,12 +163,12 @@ function BotLensModal({ modalProps }: { modalProps: any; }) {
                         ))}
                     </ScrollerThin>
                     <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Channels</Forms.FormTitle>
+                        <Heading tag="h5">Channels</Heading>
                         {channels.map(c => (
                             <Button
                                 key={c.id}
-                                size={Button.Sizes.SMALL}
-                                look={channelId === c.id ? Button.Looks.FILLED : Button.Looks.LINK}
+                                size="small"
+                                variant={channelId === c.id ? "primary" : "secondary"}
                                 style={{ display: "block", width: "100%", textAlign: "left" }}
                                 onClick={() => loadMessages(c.id)}
                             >
@@ -188,22 +177,22 @@ function BotLensModal({ modalProps }: { modalProps: any; }) {
                         ))}
                     </ScrollerThin>
                     <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Forms.FormTitle tag="h5">Messages</Forms.FormTitle>
+                        <Heading tag="h5">Messages</Heading>
                         {messages.map(m => (
                             <div key={m.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--background-modifier-accent)" }}>
-                                <Forms.FormText style={{ fontSize: 12, opacity: 0.7 }}>
+                                <Paragraph style={{ fontSize: 12, opacity: 0.7 }}>
                                     {m.author?.username} · {m.timestamp}
-                                </Forms.FormText>
-                                <Forms.FormText style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
+                                </Paragraph>
+                                <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
                                     {m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : "[empty/embed]")}
-                                </Forms.FormText>
+                                </Paragraph>
                             </div>
                         ))}
-                        {!messages.length && <Forms.FormText>Select a channel.</Forms.FormText>}
+                        {!messages.length && <Paragraph>Select a channel.</Paragraph>}
                     </ScrollerThin>
                 </div>
-            </Modal.ModalContent>
-        </Modal.ModalRoot>
+            </div>
+        </Modal>
     );
 }
 

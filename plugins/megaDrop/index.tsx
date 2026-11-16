@@ -6,25 +6,15 @@
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { chooseFile, saveFile } from "@utils/web";
 import { CloudUpload as TCloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import { findLazy } from "@webpack";
-import {
-    Button,
-    Constants,
-    FluxDispatcher,
-    Forms,
-    Menu,
-    React,
-    RestAPI,
-    SelectedChannelStore,
-    showToast,
-    SnowflakeUtils,
-    useState
-} from "@webpack/common";
+import { Constants, FluxDispatcher, Menu, React, RestAPI, SelectedChannelStore, showToast, SnowflakeUtils, useState } from "@webpack/common";
 
 const Author = { name: "sernik", id: 0n };
 const MANIFEST_PREFIX = "MEGADROP1:";
@@ -61,11 +51,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Default: upload to bashupload.com (or your host) and post the link.
                 Peer mode: split into parts, open a thread named <code>filename - N parts</code>,
                 and auto-assemble on the receiving MegaDrop client.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     uploadHost: {
@@ -192,7 +182,7 @@ async function sendChunked(channelId: string, file: File) {
     const bytes = new Uint8Array(buf);
     const parts = Math.ceil(bytes.length / binPart) || 1;
     const threadName = `${file.name} - ${parts} parts`.slice(0, 100);
-    showToast({ text: `MegaDrop: thread for ${parts} parts…`, variant: "info" });
+    showToast({ text: `MegaDrop: thread for ${parts} parts…`, variant: "default" });
     const threadId = await createThread(channelId, threadName);
 
     const manifest: Manifest = {
@@ -212,7 +202,7 @@ async function sendChunked(channelId: string, file: File) {
             partFile,
             `MEGADROP_PART ${i + 1}/${parts} ${file.name}`
         );
-        showToast({ text: `MegaDrop: part ${i + 1}/${parts}`, variant: "info" });
+        showToast({ text: `MegaDrop: part ${i + 1}/${parts}`, variant: "default" });
     }
 
     await sendMessage(threadId, {
@@ -222,7 +212,7 @@ async function sendChunked(channelId: string, file: File) {
 }
 
 async function sendBashupload(channelId: string, file: File) {
-    showToast({ text: `MegaDrop: uploading ${file.name}…`, variant: "info" });
+    showToast({ text: `MegaDrop: uploading ${file.name}…`, variant: "default" });
     const url = await uploadToHost(file);
     const hash = await sha256(await file.arrayBuffer());
     const manifest: Manifest = {
@@ -299,14 +289,14 @@ async function tryAssemble(channelId: string, state: { manifest: Manifest; parts
 
 async function onMessage(event: any) {
     if (event.type !== "MESSAGE_CREATE") return;
-    const message = event.message;
+    const { message } = event;
     if (!message) return;
     const content = message.content || "";
     const channelId = message.channel_id;
 
     const man = parseManifest(content);
     if (man?.mode === "bashupload" && man.url) {
-        showToast({ text: `MegaDrop available: ${man.name}`, variant: "info" });
+        showToast({ text: `MegaDrop available: ${man.name}`, variant: "default" });
     }
     if (man?.mode === "chunks") {
         const st = pending.get(channelId) ?? { manifest: man, parts: new Map() };
@@ -334,7 +324,7 @@ async function onMessage(event: any) {
             st.parts.set(idx, buf);
             pending.set(channelId, st);
             if (settings.store.autoAssemble) await tryAssemble(channelId, st);
-            else showToast({ text: `MegaDrop part ${idx}/${st.manifest.parts}`, variant: "info" });
+            else showToast({ text: `MegaDrop part ${idx}/${st.manifest.parts}`, variant: "default" });
         } catch (e) {
             console.error("MegaDrop part fetch", e);
         }

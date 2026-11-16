@@ -5,19 +5,12 @@
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
-import {
-    Button,
-    Forms,
-    Modal,
-    openModal,
-    React,
-    SelectedChannelStore,
-    showToast,
-    TextInput,
-    useState
-} from "@webpack/common";
+import { RenderModalProps } from "@vencord/discord-types";
+import { Modal, openModal, React, SelectedChannelStore, showToast, TextInput, useState } from "@webpack/common";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -25,11 +18,11 @@ export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 User accounts cannot post true rich embeds. EmbedForge sends via a webhook you control
                 (real embeds + link buttons) or falls back to a crafted markdown / ANSI-ish card in chat.
                 Use /embed or the toolbox builder.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     defaultWebhook: {
@@ -154,10 +147,10 @@ export async function forgeSend(opts: {
 
     const content = markdownCard(opts);
     await sendMessage(opts.channelId, { content });
-    showToast({ text: "EmbedForge: markdown card sent", variant: "info" });
+    showToast({ text: "EmbedForge: markdown card sent", variant: "default" });
 }
 
-function BuilderModal({ modalProps }: { modalProps: any; }) {
+function BuilderModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [title, setTitle] = useState("Hello from EmbedForge");
     const [description, setDescription] = useState("Configurable weird useful object.");
     const [url, setUrl] = useState("");
@@ -170,26 +163,22 @@ function BuilderModal({ modalProps }: { modalProps: any; }) {
     const [asMarkdown, setAsMarkdown] = useState(false);
 
     return (
-        <Modal.ModalRoot {...modalProps} size={Modal.ModalSize.MEDIUM}>
-            <Modal.ModalHeader>
-                <Forms.FormTitle tag="h2">EmbedForge builder</Forms.FormTitle>
-                <Modal.ModalCloseButton onClick={modalProps.onClose} />
-            </Modal.ModalHeader>
-            <Modal.ModalContent>
-                <Forms.FormText>Title</Forms.FormText>
+        <Modal {...modalProps} size="md" title="EmbedForge builder">
+            <div>
+                <Paragraph>Title</Paragraph>
                 <TextInput value={title} onChange={setTitle} />
-                <Forms.FormText>Description</Forms.FormText>
+                <Paragraph>Description</Paragraph>
                 <TextInput value={description} onChange={setDescription} />
-                <Forms.FormText>URL / Color / Footer</Forms.FormText>
+                <Paragraph>URL / Color / Footer</Paragraph>
                 <TextInput value={url} onChange={setUrl} placeholder="https://..." />
                 <TextInput value={color} onChange={setColor} placeholder="#5865f2" />
                 <TextInput value={footer} onChange={setFooter} />
-                <Forms.FormText>Fields (name=value per line)</Forms.FormText>
+                <Paragraph>Fields (name=value per line)</Paragraph>
                 <TextInput value={fields} onChange={setFields} />
-                <Forms.FormText>Link button (webhook only)</Forms.FormText>
+                <Paragraph>Link button (webhook only)</Paragraph>
                 <TextInput value={buttonLabel} onChange={setButtonLabel} placeholder="Label" />
                 <TextInput value={buttonUrl} onChange={setButtonUrl} placeholder="https://..." />
-                <Forms.FormText>Webhook override</Forms.FormText>
+                <Paragraph>Webhook override</Paragraph>
                 <TextInput value={webhook} onChange={setWebhook} />
                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                     <Button onClick={async () => {
@@ -204,12 +193,12 @@ function BuilderModal({ modalProps }: { modalProps: any; }) {
                             showToast({ text: String(e), variant: "critical" });
                         }
                     }}>Send</Button>
-                    <Button look={Button.Looks.OUTLINED} onClick={() => setAsMarkdown(v => !v)}>
+                    <Button variant="secondary" onClick={() => setAsMarkdown(v => !v)}>
                         Mode: {asMarkdown ? "markdown card" : "webhook if set"}
                     </Button>
                 </div>
-            </Modal.ModalContent>
-        </Modal.ModalRoot>
+            </div>
+        </Modal>
     );
 }
 

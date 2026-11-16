@@ -5,10 +5,11 @@
  */
 
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
+import { Paragraph } from "@components/Paragraph";
 import definePlugin from "@utils/types";
 import { Channel, RenderModalProps, User } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
-import { ChannelStore, closeModal, ConfirmModal, Forms, GuildStore, Menu, Modal, openModal, showToast, useEffect, useState } from "@webpack/common";
+import { ChannelStore, closeModal, ConfirmModal, GuildStore, Menu, Modal, openModal, showToast, useEffect, useState } from "@webpack/common";
 import { ReactElement } from "react";
 
 import { ExportSettings, ExportTarget, runExport } from "./exportJob";
@@ -91,25 +92,25 @@ function ProgressModal(props: RenderModalProps) {
                 ? [{ text: "Close", variant: "primary", onClick: props.onClose }]
                 : [{ text: "Cancel", variant: "secondary", onClick: () => requestCancel() }]}
         >
-            <Forms.FormText>{snap.detail || "Preparing the archive."}</Forms.FormText>
-            <Forms.FormText>
+            <Paragraph>{snap.detail || "Preparing the archive."}</Paragraph>
+            <Paragraph>
                 {`Messages ${snap.messages.toLocaleString()} · Channels ${snap.channelsDone}/${snap.channelsTotal} · Files ${snap.files.toLocaleString()} · ${formatBytes(snap.bytes)}`}
-            </Forms.FormText>
+            </Paragraph>
             {snap.skippedFiles > 0 && (
-                <Forms.FormText>{`${snap.skippedFiles.toLocaleString()} files were over the size limit and were skipped.`}</Forms.FormText>
+                <Paragraph>{`${snap.skippedFiles.toLocaleString()} files were over the size limit and were skipped.`}</Paragraph>
             )}
             {lastErrors.map((error, index) => (
-                <Forms.FormText key={`${index}-${error.slice(0, 24)}`}>{error}</Forms.FormText>
+                <Paragraph key={`${index}-${error.slice(0, 24)}`}>{error}</Paragraph>
             ))}
             {snap.errorCount > lastErrors.length && (
-                <Forms.FormText>{`${snap.errorCount.toLocaleString()} errors in total. The list is in errors.txt inside the archive.`}</Forms.FormText>
+                <Paragraph>{`${snap.errorCount.toLocaleString()} errors in total. The list is in errors.txt inside the archive.`}</Paragraph>
             )}
             {!snap.native && (
-                <Forms.FormText>
+                <Paragraph>
                     The save dialog needs one full restart of this Discord after Local Archive is installed. Until then the zip is kept in memory and downloaded through the browser.
-                </Forms.FormText>
+                </Paragraph>
             )}
-            {snap.savedPath ? <Forms.FormText>{snap.savedPath}</Forms.FormText> : null}
+            {snap.savedPath ? <Paragraph>{snap.savedPath}</Paragraph> : null}
         </Modal>
     );
 }
@@ -154,9 +155,9 @@ function start(target: ExportTarget): void {
             cancelText="Cancel"
             onConfirm={go}
         >
-            <Forms.FormText>
+            <Paragraph>
                 This can download a lot of messages and files from channels you can already open. You can cancel while it runs. The partial zip is still saved.
-            </Forms.FormText>
+            </Paragraph>
         </ConfirmModal>
     ));
 }

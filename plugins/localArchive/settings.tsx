@@ -5,19 +5,20 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
+import { Paragraph } from "@components/Paragraph";
 import { OptionType } from "@utils/types";
-import { Forms } from "@webpack/common";
+
 
 export const settings = definePluginSettings({
     about: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Forms.FormText>
+            <Paragraph>
                 Right-click a message, channel, thread, category, server, group DM, or friend and choose Download archive.
                 Each folder name includes the Discord id, so two channels with the same name stay separate.
                 If two files in one folder still share a name, the second becomes name-2, then name-3.
                 The same Discord file is stored once when dedupe is on. JSONL is the full history. Markdown is only the readable copy, so a third plain transcript stays off unless you enable it.
-            </Forms.FormText>
+            </Paragraph>
         )
     },
     writeJson: {
