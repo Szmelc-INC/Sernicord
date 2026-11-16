@@ -891,9 +891,13 @@ cmd_restore() {
   if command -v unzip >/dev/null 2>&1; then
     unzip -q "$zip" -d "$tmp" || die "unzip failed"
   else
-    python3 - "$zip" "$tmp" <<'PY'
-import sys, zipfile
+    python3 -I - "$zip" "$tmp" <<'PY'
+import os, sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
+    for m in z.infolist():
+        dest = os.path.realpath(os.path.join(sys.argv[2], m.filename))
+        if not dest.startswith(os.path.realpath(sys.argv[2]) + os.sep):
+            sys.exit(f"unsafe path in zip: {m.filename}")
     z.extractall(sys.argv[2])
 PY
   fi
