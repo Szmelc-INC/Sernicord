@@ -428,7 +428,7 @@ async function runScan(t: Target) {
             }
             setStatus(`[${i + 1}/${sources.length}] ${src.label}: scanned ${scanned}, found ${found}`);
         }
-        while (pending.length) await flush(true);
+        if (autoPost) while (pending.length) await flush(true);
     } finally {
         await persist();
         job.running = false;
