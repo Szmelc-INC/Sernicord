@@ -231,10 +231,47 @@ async function download(url: string, name: string): Promise<File> {
 function uploadOne(channelId: string, file: File): Promise<{ filename: string; uploaded_filename: string; }> {
     return new Promise((resolve, reject) => {
         const upload = new CloudUpload({ file, isThumbnail: false, platform: CloudUploadPlatform.WEB }, channelId);
-        upload.on("complete", () => resolve({ filename: upload.filename, uploaded_filename: upload.uploadedFilename }));
-        upload.on("error", (err: any) => reject(err ?? new Error("upload error")));
+        // CloudUpload may never settle; don't let that freeze the job
+        const timer = setTimeout(() => reject(new Error(`upload ${file.name} timed out`)), 120_000);
+        upload.on("complete", () => {
+            clearTimeout(timer);
+            resolve({ filename: upload.filename, uploaded_filename: upload.uploadedFilename });
+        });
+        upload.on("error", (err: any) => {
+            clearTimeout(timer);
+            reject(err ?? new Error("upload error"));
+        });
         upload.upload();
     });
+}
+
+/**
+ * Re-host a message's attachments through `take`. Files that cannot be
+ * re-hosted become links — except before a delete (Move / Delete): a CDN link
+ * dies with the source message, so that throws and the source is kept.
+ */
+async function gatherFiles<T>(m: any, opts: RunOptions, take: (f: File) => Promise<T>): Promise<{ items: T[]; links: string[]; }> {
+    const strict = isDestructive(opts.action);
+    const limit = opts.maxUploadMb * 1024 * 1024;
+    const items: T[] = [];
+    const links: string[] = [];
+    for (const att of (m.attachments ?? []).slice(0, 10)) {
+        const name = att.filename || "file";
+        let why = "";
+        if (!opts.reuploadFiles) why = "re-upload is off";
+        else if ((att.size ?? 0) > limit) why = `bigger than ${opts.maxUploadMb} MB`;
+        else {
+            try {
+                items.push(await take(await download(att.url, name)));
+                continue;
+            } catch (e) {
+                why = errorText(e);
+            }
+        }
+        if (strict) throw new Error(`attachment ${name} not re-uploaded (${why}); source kept`);
+        links.push(att.url);
+    }
+    return { items, links };
 }
 
 async function postText(channelId: string, content: string, attachments: any[] = []) {
@@ -271,26 +308,12 @@ export async function forwardMessage(targetId: string, m: any, sourceChannelId: 
     }), job, onWait);
 }
 
-/** Repost as yourself: header + text, attachments re-uploaded (or linked when too big) */
+/** Repost as yourself: header + text + re-uploaded attachments (see gatherFiles) */
 export async function copyMessage(targetId: string, m: any, sourceChannelId: string, opts: RunOptions) {
     const header = opts.copyHeader
         ? `-# **${displayName(m)}** · <t:${Math.floor(snowflakeTime(m.id) / 1000)}:f> · ${jumpLink(m, sourceChannelId)}`
         : "";
-    const limit = opts.maxUploadMb * 1024 * 1024;
-    const links: string[] = [];
-    const uploads: any[] = [];
-
-    for (const att of (m.attachments ?? []).slice(0, 10)) {
-        if (!opts.reuploadFiles || (att.size ?? 0) > limit) {
-            links.push(att.url);
-            continue;
-        }
-        try {
-            uploads.push(await uploadOne(targetId, await download(att.url, att.filename || "file")));
-        } catch {
-            links.push(att.url);
-        }
-    }
+    const { items: uploads, links } = await gatherFiles(m, opts, f => uploadOne(targetId, f));
 
     const text = [header, bodyText(m, true), ...links].filter(Boolean).join("\n");
     const parts = chunk(text || (uploads.length ? "" : "​"));
@@ -339,20 +362,7 @@ async function webhookPost(url: string, payload: any, files: File[]) {
 
 /** Clone under the original author's name + avatar through a webhook (needs Manage Webhooks to create one) */
 export async function webhookMessage(url: string, m: any, sourceChannelId: string, opts: RunOptions) {
-    const limit = opts.maxUploadMb * 1024 * 1024;
-    const files: File[] = [];
-    const links: string[] = [];
-    for (const att of (m.attachments ?? []).slice(0, 10)) {
-        if (!opts.reuploadFiles || (att.size ?? 0) > limit) {
-            links.push(att.url);
-            continue;
-        }
-        try {
-            files.push(await download(att.url, att.filename || "file"));
-        } catch {
-            links.push(att.url);
-        }
-    }
+    const { items: files, links } = await gatherFiles(m, opts, async f => f);
     const header = opts.copyHeader ? `-# <t:${Math.floor(snowflakeTime(m.id) / 1000)}:f> · ${jumpLink(m, sourceChannelId)}` : "";
     const embeds = (m.embeds ?? []).filter((e: any) => e.type === "rich").slice(0, 10).map(cleanEmbed);
     const text = [header, bodyText(m, false), ...links].filter(Boolean).join("\n");
@@ -403,17 +413,23 @@ export async function buildBackup(plan: Plan, label: string): Promise<File> {
     files["messages.json"] = strToU8(JSON.stringify(messages, null, 2));
     files["messages.txt"] = strToU8(txt);
 
-    if (opts.backupFiles) {
+    // the pre-Move/Delete ZIP must hold the files: their URLs die with the messages
+    // (no size cap, and a failed download aborts the whole run before anything is deleted)
+    const strict = isDestructive(opts.action);
+    if (opts.backupFiles || strict) {
         let n = 0;
         for (const m of messages) {
             for (const a of m.attachments ?? []) {
                 if (job.abort) throw new AbortedError();
-                if ((a.size ?? 0) > limit) continue;
+                if (!strict && (a.size ?? 0) > limit) continue;
                 setStatus(`Backup: downloading files… ${++n}`);
                 try {
                     const f = await download(a.url, a.filename || "file");
                     files[`files/${m.id}-${safeName(a.filename || a.id)}`] = new Uint8Array(await f.arrayBuffer());
-                } catch { /* keep going; the URL stays in messages.json */ }
+                } catch (e) {
+                    if (strict) throw new Error(`backup of ${a.filename} failed (${errorText(e)}); nothing deleted`);
+                    // otherwise keep going; the URL stays in messages.json
+                }
             }
         }
     }

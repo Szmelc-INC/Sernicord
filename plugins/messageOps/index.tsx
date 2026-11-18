@@ -163,7 +163,7 @@ export const settings = definePluginSettings({
     },
     autoBackup: {
         type: OptionType.BOOLEAN,
-        description: "Move / Delete: save a ZIP of everything selected before starting",
+        description: "Move / Delete: save a ZIP of everything selected (with all files) before starting; a failed download stops the run",
         default: true
     },
     backupFiles: {
