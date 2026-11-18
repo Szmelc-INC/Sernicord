@@ -1,5 +1,5 @@
 # fish completion for sernicord
-set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update check rebuild repair reinstall restart logs doctor status stop profiles backup restore scan clean-build completion version help
+set -l cmds dev up menu setup sync-plugins build watch inject uninject launch fix update upgrade self-update check rebuild repair reinstall restart logs doctor status stop profiles backup restore scan clean-build completion version help
 
 complete -c sernicord -f
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a dev -d 'Build, sync, inject, watch, launch (default)'
@@ -14,6 +14,8 @@ complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a uninject -d 
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a launch -d 'Launch isolated Discord'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a fix -d 'Re-inject after Discord update'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a update -d 'Pull, deps, rebuild, reinject'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a upgrade -d 'Full auto update: repo, targets, deps, Discord, build'
+complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a self-update -d 'Alias for upgrade'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a check -d 'Scan + type-check plugins against target API'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a rebuild -d 'Clean dist, full build, verify'
 complete -c sernicord -n "not __fish_seen_subcommand_from $cmds" -a repair -d 'Fix pnpm, stale watch, rebuild, reinject'
@@ -52,3 +54,5 @@ complete -c sernicord -l no-color -d 'Disable colors (honors NO_COLOR)'
 complete -c sernicord -l full -d 'Backup: include Chromium caches'
 complete -c sernicord -l plugins-only -d 'Backup/restore: plugins only'
 complete -c sernicord -l data-only -d 'Restore: profile data only'
+complete -c sernicord -n "__fish_seen_subcommand_from upgrade self-update" -l no-self -d 'Upgrade: skip the repo pull'
+complete -c sernicord -n "__fish_seen_subcommand_from upgrade self-update" -l no-build -d 'Upgrade: skip build + reinject'

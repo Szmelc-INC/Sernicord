@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 PLUGINS_DIR="$ROOT/plugins"
 CLIENTS_DIR="$ROOT/clients"
 DEFAULT_PROFILE="sernicord"
@@ -195,6 +195,9 @@ ${ACC}── Injection / lifecycle ───────────────
   launch                   Launch isolated Discord for the profile
   fix                      Re-inject after Discord self-update / broken patch
   update                   git pull target + deps + rebuild + reinject
+  ${AQUA}upgrade${RST}                  Full auto update: Sernicord repo, every cloned target, deps,
+                           ${DIM}missing Discord pieces, completions, plugins, rebuild, reinject${RST}
+                           ${DIM}--no-self skips the repo pull, --no-build only syncs plugins${RST}
   stop                     Stop watch + this profile's Discord
 
 ${ACC}── Maintenance ──────────────────────────────────────${RST}
@@ -232,6 +235,8 @@ ${ACC}── Options ───────────────────�
   ${SILVER}--no-color${RST}               Disable colors (also honors ${SILVER}NO_COLOR${RST})
   ${SILVER}-y, --yes${RST}                Assume yes for prompts
   ${SILVER}-f, --follow${RST}             Follow the log (logs)
+  ${SILVER}--no-self${RST}                upgrade: do not pull the Sernicord repo
+  ${SILVER}--no-build${RST}               upgrade: skip build + reinject (plugins are still synced)
 
 ${ACC}── Examples ─────────────────────────────────────────${RST}
   ${BLD}./sernicord${RST}                          ${DIM}# full Sernicord dev (default)${RST}
@@ -268,6 +273,9 @@ RESTORE_PLUGINS_ONLY=0
 RESTORE_DATA_ONLY=0
 IMPORT_SCOPE=""
 IMPORT_FROM=""
+UPGRADE_NO_SELF=0
+NO_BUILD=0
+ORIG_ARGS=()
 
 parse_args() {
   local positional=()
@@ -290,6 +298,8 @@ parse_args() {
       --data-only) RESTORE_DATA_ONLY=1; shift ;;
       --import) IMPORT_SCOPE="${2:-}"; shift 2 ;;
       --from) IMPORT_FROM="${2:-}"; shift 2 ;;
+      --no-self) UPGRADE_NO_SELF=1; shift ;;
+      --no-build) NO_BUILD=1; shift ;;
       --) shift; break ;;
       -*)
         die "Unknown option: $1 (try ./sernicord help)"
@@ -1184,6 +1194,132 @@ cmd_update() {
   ok "Updated + reinjected"
 }
 
+git_head() {
+  git -C "$1" rev-parse --short HEAD 2>/dev/null || echo "-"
+}
+
+# Pull a checkout from its upstream. Local edits to files upstream did not touch
+# are autostashed and reapplied; if upstream changed a locally edited file the
+# pull is skipped (an autostash would leave conflict markers in it). A failed
+# rebase rolls back instead of leaving a half-done one.
+pull_tree() {
+  local dir="$1" label="$2" before after overlap
+  if ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    warn "$label: not a git checkout — skipped"
+    return 0
+  fi
+  before=$(git_head "$dir")
+  if ! git -C "$dir" fetch --prune --tags --quiet; then
+    warn "$label: fetch failed — still at $before"
+    return 0
+  fi
+  if ! git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+    warn "$label: branch '$(git -C "$dir" branch --show-current)' has no upstream — fetched only ($before)"
+    return 0
+  fi
+  overlap=$(comm -12 \
+    <(git -C "$dir" diff --name-only HEAD | sort -u) \
+    <(git -C "$dir" diff --name-only "HEAD...@{u}" | sort -u))
+  if [[ -n "$overlap" ]]; then
+    warn "$label: upstream changed files you edited locally — not pulled (still $before):"
+    printf '      %s\n' $overlap >&2
+    note "commit or stash them, then run upgrade again"
+    return 0
+  fi
+  if ! git -C "$dir" pull --rebase --autostash --quiet; then
+    git -C "$dir" rebase --abort >/dev/null 2>&1 || true
+    warn "$label: pull failed (conflict with local changes?) — left at $before"
+    return 0
+  fi
+  after=$(git_head "$dir")
+  # compare full hashes: the short form can grow by a character after a fetch
+  if [[ "$(git -C "$dir" rev-parse "$before" 2>/dev/null)" == "$(git -C "$dir" rev-parse HEAD)" ]]; then
+    ok "$label: up to date ($after)"
+  else
+    ok "$label: $before → $after"
+    git -C "$dir" log --oneline --no-decorate "$before..HEAD" 2>/dev/null | head -15 | sed 's/^/      /'
+  fi
+}
+
+# Overwrite completion files the user already installed (never installs new ones)
+refresh_completions() {
+  local dir="${SERNICORD_COMPLETIONS:-$ROOT/completions}" data cfg pair dst n=0
+  data="${HOST_XDG_DATA_HOME:-$HOME/.local/share}"
+  cfg="${HOST_XDG_CONFIG_HOME:-$HOME/.config}"
+  for pair in \
+    "sernicord.bash:$data/bash-completion/completions/sernicord" \
+    "_sernicord:$data/zsh/site-functions/_sernicord" \
+    "sernicord.fish:$cfg/fish/completions/sernicord.fish"; do
+    dst="${pair#*:}"
+    [[ -f "$dst" && -f "$dir/${pair%%:*}" ]] || continue
+    cp -f "$dir/${pair%%:*}" "$dst" && n=$((n + 1))
+  done
+  if (( n )); then ok "Refreshed $n installed completion file(s)"; else note "No user-installed completions to refresh"; fi
+}
+
+# Full auto update: Sernicord itself, every cloned target, deps, missing
+# Discord pieces, completions, plugins, build, reinject.
+cmd_upgrade() {
+  local t src self_sum before_plugins after_plugins added was_watching=0
+  ensure_toolchain
+  before_plugins="${SERNICORD_PLUGINS_BEFORE:-$(ls "$PLUGINS_DIR" 2>/dev/null | tr '\n' ' ')}"
+
+  hdr "Sernicord"
+  if (( UPGRADE_NO_SELF )); then
+    note "Self update skipped (--no-self)"
+  elif git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    self_sum=$(sha256sum "$ROOT/sernicord" | cut -d' ' -f1)
+    pull_tree "$ROOT" "sernicord"
+    if [[ "$(sha256sum "$ROOT/sernicord" | cut -d' ' -f1)" != "$self_sum" ]]; then
+      info "The sernicord script changed — continuing with the new version"
+      # the leading "upgrade" wins over the original command (e.g. when run from the menu)
+      SERNICORD_PLUGINS_BEFORE="$before_plugins" exec "$ROOT/sernicord" upgrade --no-self "${ORIG_ARGS[@]}"
+    fi
+  else
+    warn "Packaged install (no git checkout at $ROOT) — update the package itself: yay -Syu sernicord-git / nix profile upgrade"
+  fi
+
+  hdr "Targets"
+  ensure_target_clone
+  for t in vencord equicord; do
+    src=$(target_src "$t")
+    [[ -f "$src/package.json" ]] || continue
+    pull_tree "$src" "$t"
+    info "$t: installing dependencies"
+    (cd "$src" && { host pnpm install --frozen-lockfile || host pnpm install; }) || warn "$t: pnpm install had issues"
+  done
+
+  hdr "Completions"
+  refresh_completions
+
+  hdr "Discord"
+  mkdir -p "$ROOT/discord-app"
+  apply_profile_env
+  ensure_discord_bootstrap
+  ensure_client
+  ok "Discord bootstrap + client present ($CHANNEL, profile $PROFILE)"
+
+  hdr "Plugins + build"
+  if (( NO_BUILD )); then
+    sync_plugins
+    note "Build skipped (--no-build) — run ./sernicord rebuild when ready"
+  else
+    watch_running && was_watching=1
+    (( was_watching )) && stop_watch
+    build_target
+    inject_target
+    (( was_watching )) && start_watch
+  fi
+
+  after_plugins=$(ls "$PLUGINS_DIR" 2>/dev/null | tr '\n' ' ')
+  added=$(comm -13 <(tr ' ' '\n' <<<"$before_plugins" | sort -u) <(tr ' ' '\n' <<<"$after_plugins" | sort -u) | grep -v '^$' | tr '\n' ' ' || true)
+  hdr "Done"
+  kv "sernicord" "$(git_head "$ROOT")"
+  kv "$TARGET" "$(git_head "$(target_src "$TARGET")")"
+  [[ -n "$added" ]] && kv "new plugins" "$AQUA$added$RST"
+  ok "Upgrade complete — restart Discord (or Ctrl+R) to load it"
+}
+
 cmd_fix() {
   info "Fix: rebuild plugins sync + reinject (post Discord update)"
   ensure_toolchain
@@ -1448,6 +1584,7 @@ ${BLD}${MAG}Sernicord${RST}  target=${CYN}$TARGET${RST}  profile=${CYN}$PROFILE$
   14) Rebuild (clean)                    16) Reinstall deps
   17) Watch log                          18) Backup (zip)
   19) Restore backup                     20) Scan for Discord traces
+  21) Full upgrade (repo + targets + build)
   0) Quit
 EOF
     local choice
@@ -1483,6 +1620,7 @@ EOF
         CMD_ARG="$z" cmd_restore || true
         ;;
       20) cmd_scan || true ;;
+      21) cmd_upgrade || true ;;
       0|q|Q) exit 0 ;;
       *) warn "Unknown choice" ;;
     esac
@@ -1505,6 +1643,7 @@ cmd_completion() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
+  ORIG_ARGS=("$@")
   parse_args "$@"
   case "$CMD" in
     version) echo "sernicord ${VERSION}"; return ;;
@@ -1530,6 +1669,7 @@ main() {
     restart) ensure_toolchain; apply_profile_env; stop_all; cmd_dev ;;
     logs|log) cmd_logs ;;
     update) cmd_update ;;
+    upgrade|self-update) cmd_upgrade ;;
     doctor) cmd_doctor ;;
     status) cmd_status ;;
     stop) stop_all ;;
