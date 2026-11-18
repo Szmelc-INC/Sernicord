@@ -160,6 +160,7 @@ Bundled plugins:
 | `szmelc` | Szmelc™ — OG szmelc mode for the whole client + the "szmelc" tab in Vencord settings with all our plugins and themes |
 | `discloudStorage` | Turns a server into your private cloud storage (you + your bots + backups) |
 | `allMyGifs` | Bulk favorite-gif manager: dump all to a channel (URLs or files) and suck a channel's gifs into favorites |
+| `messageOps` | Move / clone / back up / bulk-delete message ranges: first + last message by ID (right-click), author/text/regex/file filters, forward, copy or webhook clone to a channel, mirror every action into a log channel, ZIP backups, dry run (`/msgops`) |
 
 Upstream Vencord gitignores `src/userplugins`; Sernicord keeps the publishable copies here instead.
 

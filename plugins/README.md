@@ -28,6 +28,7 @@ Bundled plugins:
 | `discloudStorage` | Turn a server into your private cloud: chunked uploads to a storage channel + JSON index your bots can read; download/delete from the settings panel, context menus and `/discloud` |
 | `allMyGifs` | Bulk-manage favorite gifs: dump all into a channel as URLs or files (`/gifdump`), suck every gif from a channel into favorites (`/gifcollect`), manage list in settings |
 | `fullCyberJacket` | Hate-speech / threat / self-harm / extremism finder for a user (every shared server + DMs), a server or a channel; beats leet, homoglyphs, spacing, zero-width; group words only count next to an aggravator; review modal with jump links, ZIP export, optional webhook digest. Never calls the report API |
+| `messageOps` | Message range ops: mark the first and last message by ID (right-click → MessageOps), filter by authors / text / regex / attachments / bots / pins, then preview, ZIP backup, copy, move or delete. Copy/move as native forward, re-post (re-uploaded files) or webhook clone with the original name + avatar. Every action can mirror each message (forward and/or copy) into a log channel first; fail-closed (never deletes unless mirror + transfer succeeded); auto ZIP before destructive runs; dry run by default; `/msgops` |
 
 Local-only experiments can live directly under a cloned target’s `src/userplugins/`;
 only what you put here is meant for the public Sernicord repo.
