@@ -15,6 +15,8 @@ _sernicord() {
         'launch:Launch isolated Discord'
         'fix:Re-inject after Discord self-update'
         'update:Pull target, deps, rebuild, reinject'
+        'upgrade:Full auto update - repo, targets, deps, Discord, completions, build'
+        'self-update:Alias for upgrade'
         'check:Scan and type-check plugins against the target API'
         'rebuild:Stop watch, clean dist, full build, verify'
         'repair:Fix pnpm, kill stale watchers, check, rebuild, reinject'
@@ -52,6 +54,8 @@ _sernicord() {
         '--data-only[Restore: profile data only]' \
         '--import[Scan: import scope]:scope:(settings themes quickcss cache plugins all)' \
         '--from[Scan: import source directory]:dir:_dirs' \
+        '--no-self[Upgrade: skip the repo pull]' \
+        '--no-build[Upgrade: skip build and reinject]' \
         '1:command:->cmd' \
         '*::arg:->args'
 

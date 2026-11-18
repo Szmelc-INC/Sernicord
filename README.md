@@ -64,6 +64,7 @@ Then:
 | `launch` | Start isolated Discord for the profile |
 | `fix` | Rebuild + reinject after Discord updates |
 | `update` | `git pull` target + deps + rebuild + reinject |
+| `upgrade` / `self-update` | Full auto update: pulls the Sernicord repo itself (local edits autostashed; re-runs the new script if it changed), every cloned target, deps, fetches missing Discord bootstrap/client, refreshes installed completions, syncs plugins, rebuilds, reinjects and restarts a running watch. Lists new plugins. `--no-self`, `--no-build` |
 | `check` | Scan `plugins/` for removed target APIs and type-check them (`tsc`) |
 | `rebuild` | Stop watch, wipe `dist/`, full build, verify every bundle exists |
 | `repair` | Fix pnpm, kill stale watchers, `check`, clean rebuild, reinject |
@@ -76,7 +77,7 @@ Then:
 | `restore <file.zip>` | Restore a backup into the current profile (`--plugins-only` / `--data-only`) |
 | `scan` | Find other Discord/Vencord/Vesktop/BetterDiscord traces on the system; import settings/themes/quickcss/cache/plugins with `--import … --from <dir>` |
 
-Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `--no-color`, `--full`, `--plugins-only`, `--data-only`, `--import`, `--from`, `-y`, `-f`, `--system` (dangerous). Output is colored (Szmelc palette) and honors `NO_COLOR`/`--no-color`.
+Options: `--target vencord|equicord`, `--profile NAME`, `--channel stable|ptb|canary`, `--no-launch`, `--no-watch`, `--prod`, `--no-color`, `--full`, `--plugins-only`, `--data-only`, `--import`, `--from`, `--no-self`, `--no-build`, `-y`, `-f`, `--system` (dangerous). Output is colored (Szmelc palette) and honors `NO_COLOR`/`--no-color`.
 
 ### Troubleshooting
 
