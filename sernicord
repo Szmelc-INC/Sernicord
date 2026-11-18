@@ -1271,7 +1271,8 @@ cmd_upgrade() {
     pull_tree "$ROOT" "sernicord"
     if [[ "$(sha256sum "$ROOT/sernicord" | cut -d' ' -f1)" != "$self_sum" ]]; then
       info "The sernicord script changed — continuing with the new version"
-      SERNICORD_PLUGINS_BEFORE="$before_plugins" exec "$ROOT/sernicord" "${ORIG_ARGS[@]}" --no-self
+      # the leading "upgrade" wins over the original command (e.g. when run from the menu)
+      SERNICORD_PLUGINS_BEFORE="$before_plugins" exec "$ROOT/sernicord" upgrade --no-self "${ORIG_ARGS[@]}"
     fi
   else
     warn "Packaged install (no git checkout at $ROOT) — update the package itself: yay -Syu sernicord-git / nix profile upgrade"
