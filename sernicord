@@ -1232,11 +1232,12 @@ pull_tree() {
     return 0
   fi
   after=$(git_head "$dir")
-  if [[ "$before" == "$after" ]]; then
+  # compare full hashes: the short form can grow by a character after a fetch
+  if [[ "$(git -C "$dir" rev-parse "$before" 2>/dev/null)" == "$(git -C "$dir" rev-parse HEAD)" ]]; then
     ok "$label: up to date ($after)"
   else
     ok "$label: $before → $after"
-    git -C "$dir" log --oneline --no-decorate "$before..$after" 2>/dev/null | head -15 | sed 's/^/      /'
+    git -C "$dir" log --oneline --no-decorate "$before..HEAD" 2>/dev/null | head -15 | sed 's/^/      /'
   fi
 }
 
