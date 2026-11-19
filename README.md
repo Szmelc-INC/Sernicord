@@ -1,16 +1,20 @@
-# Sernicord ~ A Better Vencord+ for devs & serniks
+> # Sernicord 
+> ### A Better Discord client, for Power Users & Power Devs
+> Isolated Discord mod workspace with a universal sideloader. Default mode builds **Vencord (dev)** with every plugin under `plugins/`, injects into a **local** Discord profile, watches for changes, and launches. \
+> System Discord and `~/.config/discord` stay untouched unless you deliberately pass `--system` (and confirm).
+>
+> [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+> [![Arch PKGBUILD](https://img.shields.io/badge/Arch-PKGBUILD-1793d1?logo=archlinux&logoColor=white)](PKGBUILD)
+> [![Nix flake](https://img.shields.io/badge/Nix-flake-5277c3?logo=nixos&logoColor=white)](flake.nix)
+> [![Vencord](https://img.shields.io/badge/target-Vencord%20%7C%20Equicord-ff69b4)](https://github.com/Vendicated/Vencord)
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Arch PKGBUILD](https://img.shields.io/badge/Arch-PKGBUILD-1793d1?logo=archlinux&logoColor=white)](PKGBUILD)
-[![Nix flake](https://img.shields.io/badge/Nix-flake-5277c3?logo=nixos&logoColor=white)](flake.nix)
-[![Vencord](https://img.shields.io/badge/target-Vencord%20%7C%20Equicord-ff69b4)](https://github.com/Vendicated/Vencord)
+> ### Example modules:
+> <img width="543" height="346" alt="image" src="https://github.com/user-attachments/assets/cc3c1152-ce0f-4dec-a938-adbd3f7b8cb9" />
+>
+> ### Fire memes:
+>
+> <img width="300" height="501" alt="image" src="https://github.com/user-attachments/assets/f260d09d-a7bc-4b4a-8311-1f13f375f83e" />
 
-### Example modules:
-<img width="943" height="646" alt="image" src="https://github.com/user-attachments/assets/cc3c1152-ce0f-4dec-a938-adbd3f7b8cb9" />
-
-Isolated Discord mod workspace with a universal sideloader. Default mode builds **Vencord (dev)** with every plugin under `plugins/`, injects into a **local** Discord profile, watches for changes, and launches.
-
-System Discord and `~/.config/discord` stay untouched unless you deliberately pass `--system` (and confirm).
 
 ## Install
 
@@ -178,6 +182,5 @@ Sideloader and Sernicord packaging: use under the same spirit as Vencord — plu
 
 ---
 
-> <img width="300" height="501" alt="image" src="https://github.com/user-attachments/assets/f260d09d-a7bc-4b4a-8311-1f13f375f83e" />
 > <img width="500" height="501" alt="image" src="https://github.com/user-attachments/assets/dc16b379-6518-4e3a-b002-7acf4d79b31a" />
 
