@@ -1,63 +1,55 @@
 /*
- * Sernicord MessageOps — REST helpers + range fetch
+ * Sernicord MessageOps — Discord gateway: every request of a job goes through the Limiter
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { Constants, RestAPI } from "@webpack/common";
 
-export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+import { Abortable, AbortedError, Limiter, RawResponse, routeOf } from "./limiter";
 
-export class AbortedError extends Error {
-    constructor() { super("aborted"); }
+export { AbortedError, ApiError } from "./limiter";
+
+type Method = "get" | "post" | "put" | "patch" | "del";
+
+export interface RestData {
+    query?: Record<string, any>;
+    body?: Record<string, any>;
+    /** multipart: files go out as files[n], the JSON as payload_json */
+    files?: File[];
 }
 
-export interface Abortable {
-    abort: boolean;
-}
-
-/** Sleep that wakes up early (and throws) once the job is aborted */
-export async function pause(ms: number, job: Abortable): Promise<void> {
-    const end = Date.now() + Math.max(0, ms);
-    while (Date.now() < end) {
-        if (job.abort) throw new AbortedError();
-        await sleep(Math.min(250, end - Date.now()));
+/**
+ * RestAPI with retries off (the Limiter retries) and failImmediatelyWhenRateLimited,
+ * so Discord's own per-URL queue cannot hide a wait from the job status.
+ */
+export function rest(limiter: Limiter, job: Abortable, method: Method, url: string, data: RestData = {}): Promise<RawResponse> {
+    const req: any = { url, retries: 0, failImmediatelyWhenRateLimited: true };
+    if (data.query) req.query = data.query;
+    if (data.files?.length) {
+        req.attachments = data.files.map((f, i) => ({ name: `files[${i}]`, file: f, filename: f.name }));
+        req.fields = [{ name: "payload_json", value: JSON.stringify(data.body ?? {}) }];
+    } else if (data.body) {
+        req.body = data.body;
     }
-    if (job.abort) throw new AbortedError();
+    return limiter.run(routeOf(method === "del" ? "delete" : method, url), () => RestAPI[method](req), job);
 }
 
-export function statusOf(e: any): number {
-    const status = Number(e?.status ?? e?.statusCode ?? 0);
-    return Number.isFinite(status) ? status : 0;
+/** POST to a webhook URL (fetch, same origin, so the rate limit headers are readable) */
+export function webhookExecute(limiter: Limiter, job: Abortable, url: string, payload: any, files: File[]): Promise<RawResponse> {
+    return limiter.run(routeOf("post", url), async () => {
+        const form = new FormData();
+        form.append("payload_json", JSON.stringify(payload));
+        files.forEach((f, i) => form.append(`files[${i}]`, f, f.name));
+        const res = await fetch(url, { method: "POST", body: form });
+        const body = await res.json().catch(() => null);
+        const raw: RawResponse = { status: res.status, headers: res.headers, body };
+        if (!res.ok) throw raw;
+        return raw;
+    }, job);
 }
 
-export function errorText(e: any): string {
-    if (typeof e?.body?.message === "string") return `${statusOf(e) || "?"} ${e.body.message}`;
-    if (typeof e?.message === "string" && e.message) return e.message;
-    return String(e);
-}
-
-/** Retries 429 (honoring retry_after) and transient 5xx / network errors */
-export async function withRetry<T>(fn: () => Promise<T>, job: Abortable, onWait?: (s: number) => void): Promise<T> {
-    for (let tries = 0; ; tries++) {
-        if (job.abort) throw new AbortedError();
-        try {
-            return await fn();
-        } catch (e: any) {
-            if (e instanceof AbortedError) throw e;
-            const status = statusOf(e);
-            if (status === 429 && tries < 10) {
-                const seconds = Math.min(Number(e?.body?.retry_after ?? e?.retry_after ?? 2) || 2, 120);
-                onWait?.(seconds);
-                await pause(seconds * 1000 + 250, job);
-                continue;
-            }
-            if ((status === 0 || status >= 500) && tries < 3) {
-                await pause(800 * (tries + 1), job);
-                continue;
-            }
-            throw e;
-        }
-    }
+export function bodyOf<T = any>(res: RawResponse): T {
+    return (res as any)?.body;
 }
 
 export function snowflakeTime(id: string): number {
@@ -81,16 +73,13 @@ export function normalizeRange(a?: string, b?: string): { lo?: string; hi?: stri
 }
 
 /** True when the message exists in that channel (single GET is refused for users, so use `around`) */
-export async function messageInChannel(channelId: string, messageId: string, job: Abortable): Promise<boolean> {
+export async function messageInChannel(limiter: Limiter, job: Abortable, channelId: string, messageId: string): Promise<boolean> {
     try {
-        const res: any = await withRetry(() => RestAPI.get({
-            url: Constants.Endpoints.MESSAGES(channelId),
-            query: { around: messageId, limit: 1 },
-            retries: 0
-        }), job);
-        const body = res?.body ?? res;
+        const res = await rest(limiter, job, "get", Constants.Endpoints.MESSAGES(channelId), { query: { around: messageId, limit: 1 } });
+        const body = bodyOf(res);
         return Array.isArray(body) && body.some((m: any) => m?.id === messageId);
-    } catch {
+    } catch (e) {
+        if (e instanceof AbortedError) throw e;
         return false;
     }
 }
@@ -98,25 +87,15 @@ export async function messageInChannel(channelId: string, messageId: string, job
 /**
  * Walk a channel oldest → newest between two message ids (both inclusive,
  * either side open when missing). Yields sorted pages of raw API messages.
+ * No fixed delay: the Limiter paces the history bucket from its headers.
  */
-export async function* fetchRange(
-    channelId: string,
-    lo: string | undefined,
-    hi: string | undefined,
-    job: Abortable,
-    pageDelayMs: number,
-    onWait?: (s: number) => void
-): AsyncGenerator<any[]> {
+export async function* fetchRange(limiter: Limiter, job: Abortable, channelId: string, lo?: string, hi?: string): AsyncGenerator<any[]> {
     const end = hi ? BigInt(hi) : null;
     let cursor = lo ? (BigInt(lo) - 1n).toString() : "0";
 
     while (!job.abort) {
-        const res: any = await withRetry(() => RestAPI.get({
-            url: Constants.Endpoints.MESSAGES(channelId),
-            query: { limit: 100, after: cursor },
-            retries: 0
-        }), job, onWait);
-        const body: any[] = Array.isArray(res?.body) ? res.body : Array.isArray(res) ? res : [];
+        const res = await rest(limiter, job, "get", Constants.Endpoints.MESSAGES(channelId), { query: { limit: 100, after: cursor } });
+        const body: any[] = Array.isArray(bodyOf(res)) ? bodyOf(res) : [];
         if (body.length === 0) return;
 
         // the order of `after` pages is not something to rely on
@@ -127,6 +106,40 @@ export async function* fetchRange(
         if (page.length) yield page;
         if (end != null && BigInt(cursor) >= end) return;
         if (body.length < 100) return;
-        if (pageDelayMs > 0) await pause(pageDelayMs, job);
     }
+    if (job.abort) throw new AbortedError();
+}
+
+/* ---------- CDN downloads (not API rate limited: a few in parallel) ---------- */
+
+const CDN_SLOTS = 4;
+let cdnBusy = 0;
+const cdnWaiters: (() => void)[] = [];
+
+async function cdnSlot<T>(fn: () => Promise<T>): Promise<T> {
+    if (cdnBusy >= CDN_SLOTS) await new Promise<void>(r => cdnWaiters.push(r));
+    cdnBusy++;
+    try {
+        return await fn();
+    } finally {
+        cdnBusy--;
+        cdnWaiters.shift()?.();
+    }
+}
+
+export function download(url: string, name: string, job: Abortable): Promise<File> {
+    return cdnSlot(async () => {
+        if (job.abort) throw new AbortedError();
+        for (let tries = 0; ; tries++) {
+            try {
+                const res = await fetch(url);
+                if (res.ok) return new File([await res.blob()], name);
+                if (res.status !== 429 && res.status < 500 || tries >= 3) throw new Error(`download ${name}: HTTP ${res.status}`);
+            } catch (e) {
+                if (tries >= 3 || String((e as any)?.message).startsWith("download ")) throw e;
+            }
+            await new Promise(r => setTimeout(r, 1000 * 2 ** tries));
+            if (job.abort) throw new AbortedError();
+        }
+    });
 }

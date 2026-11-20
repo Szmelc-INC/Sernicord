@@ -1,6 +1,13 @@
 /*
- * Sernicord MessageOps — selection, transfer (forward / copy / webhook clone), backup, delete
+ * Sernicord MessageOps — selection, transfer (forward / repost / webhook clone), export, delete
  * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * A run is: collect (scan + filter, nothing written) → confirm → execute.
+ * Execute for Copy / Move runs two queues side by side, because they hit
+ * different rate limit buckets: a writer posting to the target and, for Move,
+ * a deleter removing each source message right after its copy landed.
+ * Fail-closed: a source message is only deleted once everything it was copied
+ * into was posted (files re-hosted, not linked).
  */
 
 import { saveFile } from "@utils/web";
@@ -8,20 +15,21 @@ import { CloudUpload as TCloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform, MessageReferenceType } from "@vencord/discord-types/enums";
 import { findLazy } from "@webpack";
 import {
-    ChannelStore, Constants, PermissionsBits, PermissionStore, RestAPI, SnowflakeUtils, UserStore
+    ChannelStore, Constants, GuildStore, PermissionsBits, PermissionStore, SnowflakeUtils, UserStore
 } from "@webpack/common";
-import { strToU8, zipSync } from "fflate";
+import { strToU8, Zippable, zipSync } from "fflate";
 
 import {
-    AbortedError, errorText, fetchRange, isSnowflake, messageInChannel, normalizeRange,
-    pause, snowflakeTime, withRetry
+    AbortedError, ApiError, bodyOf, download, fetchRange, isSnowflake, messageInChannel,
+    normalizeRange, rest, snowflakeTime, webhookExecute
 } from "./api";
+import { Limiter } from "./limiter";
 
 const CloudUpload: typeof TCloudUpload = findLazy(m => m.prototype?.trackUploadFinished);
 
-export type Action = "preview" | "backup" | "copy" | "move" | "delete";
-export type TransferMode = "forward" | "copy" | "webhook";
-export type MirrorMode = "off" | "forward" | "copy" | "both";
+export type Action = "preview" | "export" | "copy" | "move" | "delete";
+export type Style = "forward" | "repost" | "clone";
+export type Speed = "fast" | "normal" | "careful";
 
 export interface Selection {
     channelId: string;
@@ -29,8 +37,8 @@ export interface Selection {
     endId?: string;
     /** empty = everyone */
     authorIds: string[];
-    contains?: string;
-    regex?: string;
+    /** plain text (case-insensitive) or /regex/flags */
+    text: string;
     attachments: "any" | "with" | "without";
     bots: "include" | "exclude" | "only";
     skipPinned: boolean;
@@ -42,34 +50,54 @@ export interface Selection {
 export interface RunOptions {
     action: Action;
     selection: Selection;
-    dryRun: boolean;
-    transferMode: TransferMode;
     targetChannelId: string;
-    webhookUrl: string;
-    mirrorMode: MirrorMode;
-    mirrorChannelId: string;
-    delayMs: number;
-    copyHeader: boolean;
-    reuploadFiles: boolean;
-    maxUploadMb: number;
-    autoBackup: boolean;
-    backupFiles: boolean;
-    uploadBackupToMirror: boolean;
+    style: Style;
+    /** repost / clone: pack consecutive messages of one author into one post */
+    merge: boolean;
+    /** repost / clone: small "author · time · link" line */
+    originLine: boolean;
+    /** Move / Delete: save a ZIP (with files) first */
+    safetyZip: boolean;
+    speed: Speed;
+    /** parent channel id → "webhookId/token", kept in the plugin settings */
+    webhookCache: Record<string, string>;
 }
 
 export interface Plan {
     opts: RunOptions;
+    limiter: Limiter;
     messages: any[];
+    /** Copy / Move: what gets posted together */
+    groups: any[][];
     scanned: number;
     /** matched but dropped because you lack permission to delete them */
     noPermission: number;
+}
+
+export interface Report {
+    /** messages copied / moved / deleted (preview + export: matched) */
+    done: number;
+    /** posts written to the target */
+    posts: number;
+    deleted: number;
+    failed: number;
+    /** Move: copied but the source is still there */
+    notDeleted: number;
+    errors: string[];
+    aborted: boolean;
+    /** first error that made the run stop early */
+    fatal?: string;
+    zip?: string;
 }
 
 /* ---------- job state (shared by the panel and /msgops) ---------- */
 
 export const job = {
     running: false,
+    /** hard stop: everything, right now */
     abort: false,
+    /** soft stop: post nothing new, but finish deleting what was already moved */
+    stopping: false,
     status: "Idle",
     listeners: new Set<() => void>()
 };
@@ -79,26 +107,44 @@ export function setStatus(status: string) {
     job.listeners.forEach(l => l());
 }
 
-const onWait = (s: number) => setStatus(`${job.status.replace(/ \(rate limited.*\)$/, "")} (rate limited, ${s}s)`);
+const SPEED_FLOOR: Record<Speed, number> = { fast: 0, normal: 500, careful: 2000 };
+
+function newLimiter(speed: Speed, progress: () => string) {
+    return new Limiter({
+        writeFloorMs: SPEED_FLOOR[speed] ?? SPEED_FLOOR.normal,
+        onWait: (ms, why) => setStatus(`${progress()} · ${why}, waiting ${(ms / 1000).toFixed(1)}s`)
+    });
+}
 
 /* ---------- selection ---------- */
 
 const USER_TYPES = new Set([0, 19, 20, 23]); // DEFAULT, REPLY, CHAT_INPUT_COMMAND, CONTEXT_MENU_COMMAND
+const THREAD_TYPES = new Set([10, 11, 12]);
+const FORUM_TYPES = new Set([15, 16]);
 
 export function parseIds(raw: string | undefined): string[] {
     return (raw ?? "").split(/[\s,;]+/).map(s => s.replace(/[<@!>]/g, "")).filter(isSnowflake);
 }
 
-function buildRegex(sel: Selection): RegExp | null {
-    if (!sel.regex) return null;
-    try {
-        return new RegExp(sel.regex, "iu");
-    } catch (e) {
-        throw new Error(`Bad regex: ${errorText(e)}`);
+/** "word" → case-insensitive substring, "/re/flags" → regex (default flags iu) */
+export function textMatcher(raw: string): ((text: string) => boolean) | null {
+    const s = raw.trim();
+    if (!s) return null;
+    const m = s.match(/^\/(.+)\/([a-z]*)$/s);
+    if (m) {
+        let re: RegExp;
+        try {
+            re = new RegExp(m[1], m[2].replace(/[gy]/g, "") || "iu");
+        } catch (e: any) {
+            throw new Error(`Bad regex: ${e?.message ?? e}`);
+        }
+        return t => re.test(t);
     }
+    const needle = s.toLowerCase();
+    return t => t.toLowerCase().includes(needle);
 }
 
-function matches(m: any, sel: Selection, re: RegExp | null): boolean {
+function matches(m: any, sel: Selection, text: ((t: string) => boolean) | null): boolean {
     if (!sel.includeSystem && !USER_TYPES.has(m.type)) return false;
     if (sel.authorIds.length && !sel.authorIds.includes(m.author?.id)) return false;
     const bot = !!m.author?.bot || m.webhook_id != null;
@@ -108,53 +154,72 @@ function matches(m: any, sel: Selection, re: RegExp | null): boolean {
     const files = m.attachments?.length ?? 0;
     if (sel.attachments === "with" && !files) return false;
     if (sel.attachments === "without" && files) return false;
-    const text: string = m.content ?? "";
-    if (sel.contains && !text.toLowerCase().includes(sel.contains.toLowerCase())) return false;
-    if (re && !re.test(text)) return false;
+    if (text && !text(m.content ?? "")) return false;
     return true;
 }
 
-function isDestructive(a: Action) {
+export function isDestructive(a: Action) {
     return a === "move" || a === "delete";
 }
 
-function validate(opts: RunOptions) {
-    const { action, selection: sel } = opts;
-    if (!isSnowflake(sel.channelId)) throw new Error("Source channel ID missing or invalid");
-    if (action === "copy" || action === "move") {
-        if (opts.transferMode === "webhook") {
-            if (!WEBHOOK_RE.test(opts.webhookUrl.trim())) throw new Error("Webhook URL missing or not a discord.com webhook");
-        } else if (!isSnowflake(opts.targetChannelId)) {
-            throw new Error("Target channel ID missing or invalid");
-        }
+export function isTransfer(a: Action) {
+    return a === "copy" || a === "move";
+}
+
+function can(bit: bigint | undefined, channel: any) {
+    return bit == null || PermissionStore.can(bit, channel);
+}
+
+/** Refuse a target that would only produce 403s (each one counts towards Discord's invalid request ban) */
+function checkTarget(opts: RunOptions, messages: any[]) {
+    const id = opts.targetChannelId;
+    if (!isSnowflake(id)) throw new Error("Target channel ID missing or invalid (right-click a channel → MessageOps → Set as target)");
+    if (id === opts.selection.channelId) throw new Error("Target is the source channel");
+    const ch = ChannelStore.getChannel(id);
+    if (!ch) throw new Error("Target channel is not loaded — open it once, then retry");
+    if (FORUM_TYPES.has(ch.type)) throw new Error("Target is a forum — pick one of its posts instead");
+    if (opts.style === "clone" && !ch.guild_id) throw new Error("Clone (webhook) works only in server channels — use Repost for DMs");
+    if (!ch.guild_id) return;
+
+    const thread = THREAD_TYPES.has(ch.type);
+    if (opts.style === "clone") {
+        const parent = thread ? ChannelStore.getChannel(ch.parent_id) : ch;
+        if (!parent || !can(PermissionsBits.MANAGE_WEBHOOKS, parent)) throw new Error("Clone needs Manage Webhooks in the target channel");
+        return;
     }
-    if (opts.mirrorMode !== "off" && !isSnowflake(opts.mirrorChannelId)) {
-        throw new Error("Mirror is on but the mirror channel ID is missing or invalid");
+    if (!can(thread ? PermissionsBits.SEND_MESSAGES_IN_THREADS : PermissionsBits.SEND_MESSAGES, ch)) {
+        throw new Error("No permission to send messages in the target");
+    }
+    if (opts.style === "repost" && messages.some(m => m.attachments?.length) && !can(PermissionsBits.ATTACH_FILES, ch)) {
+        throw new Error("No permission to attach files in the target");
     }
 }
 
 /** Fetch + filter the range. Nothing is written. */
 export async function collect(opts: RunOptions): Promise<Plan> {
-    validate(opts);
     const sel = opts.selection;
-    const re = buildRegex(sel);
+    if (!isSnowflake(sel.channelId)) throw new Error("Source channel ID missing or invalid");
+    const text = textMatcher(sel.text);
     const { lo, hi } = normalizeRange(sel.startId, sel.endId);
 
+    let scanned = 0;
+    const messages: any[] = [];
+    const scanLine = () => `Scanning… ${scanned} read, ${messages.length} matched`;
+    const limiter = newLimiter(opts.speed, scanLine);
+
     for (const id of [lo, hi]) {
-        if (id && !await messageInChannel(sel.channelId, id, job)) {
+        if (id && !await messageInChannel(limiter, job, sel.channelId, id)) {
             throw new Error(`Message ${id} is not in channel ${sel.channelId} (threads have their own channel ID)`);
         }
     }
 
-    const messages: any[] = [];
-    let scanned = 0;
-    for await (const page of fetchRange(sel.channelId, lo, hi, job, 300, onWait)) {
+    for await (const page of fetchRange(limiter, job, sel.channelId, lo, hi)) {
         scanned += page.length;
         for (const m of page) {
-            if (matches(m, sel, re)) messages.push(m);
+            if (matches(m, sel, text)) messages.push(m);
             if (sel.maxCount > 0 && messages.length >= sel.maxCount) break;
         }
-        setStatus(`Scanning… ${scanned} read, ${messages.length} matched`);
+        setStatus(scanLine());
         if (sel.maxCount > 0 && messages.length >= sel.maxCount) break;
     }
     if (job.abort) throw new AbortedError();
@@ -171,13 +236,85 @@ export async function collect(opts: RunOptions): Promise<Plan> {
         }
     }
 
-    return { opts, messages, scanned, noPermission };
+    let groups: any[][] = [];
+    if (isTransfer(opts.action)) {
+        if (messages.length) checkTarget(opts, messages);
+        groups = groupMessages(messages, opts, uploadLimit(opts));
+    }
+
+    return { opts, limiter, messages, groups, scanned, noPermission };
 }
 
-/* ---------- writing helpers ---------- */
+/* ---------- grouping ---------- */
+
+const MB = 1024 * 1024;
+/** above this the files go through Discord's cloud upload instead of one multipart request */
+const DIRECT_UPLOAD_MAX = 24 * MB;
+const GROUP_GAP_MS = 7 * 60_000;
+/** room left for the origin line */
+const GROUP_TEXT = 1800;
+
+/** Biggest upload the target accepts: your Nitro or the server boost tier (webhooks: boost only) */
+function uploadLimit(opts: RunOptions): number {
+    const ch = ChannelStore.getChannel(opts.targetChannelId);
+    const tier = ch?.guild_id ? GuildStore.getGuild(ch.guild_id)?.premiumTier ?? 0 : 0;
+    const boost = tier >= 3 ? 100 * MB : tier === 2 ? 50 * MB : 10 * MB;
+    if (opts.style === "clone") return boost;
+    const premium = Number(UserStore.getCurrentUser()?.premiumType ?? 0);
+    const nitro = premium === 2 ? 500 * MB : premium === 1 || premium === 3 ? 50 * MB : 10 * MB;
+    return Math.max(boost, nitro);
+}
+
+function authorKey(m: any) {
+    return `${m.author?.id}:${m.webhook_id ? m.author?.username : ""}`;
+}
+
+function richEmbeds(m: any): any[] {
+    return (m.embeds ?? []).filter((e: any) => e.type === "rich");
+}
+
+/**
+ * Consecutive messages of one author within a few minutes become one post
+ * (≤ 1800 chars, ≤ 10 files within the upload limit, ≤ 10 embeds). Forward
+ * cannot merge: one forward is one message.
+ */
+export function groupMessages(messages: any[], opts: RunOptions, limitBytes: number): any[][] {
+    if (opts.style === "forward" || !opts.merge) return messages.map(m => [m]);
+    const out: any[][] = [];
+    let cur: any[] = [];
+    let chars = 0, files = 0, bytes = 0, embeds = 0;
+    for (const m of messages) {
+        const t = bodyText(m, opts.style === "repost").length;
+        const f = m.attachments?.length ?? 0;
+        const b = (m.attachments ?? []).reduce((n: number, a: any) => n + (a.size ?? 0), 0);
+        const e = opts.style === "clone" ? richEmbeds(m).length : 0;
+        const prev = cur[cur.length - 1];
+        const fits = prev
+            && authorKey(prev) === authorKey(m)
+            && snowflakeTime(m.id) - snowflakeTime(prev.id) <= GROUP_GAP_MS
+            && chars + 1 + t <= GROUP_TEXT
+            && files + f <= 10
+            && bytes + b <= limitBytes
+            && embeds + e <= 10;
+        if (!fits && cur.length) {
+            out.push(cur);
+            cur = [];
+            chars = files = bytes = embeds = 0;
+        }
+        chars += (cur.length ? 1 : 0) + t;
+        files += f;
+        bytes += b;
+        embeds += e;
+        cur.push(m);
+    }
+    if (cur.length) out.push(cur);
+    return out;
+}
+
+/* ---------- building posts ---------- */
 
 const NO_PINGS = { parse: [] as string[] };
-const WEBHOOK_RE = /^https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+$/;
+const WEBHOOK_NAME = "MessageOps";
 
 function guildOf(channelId: string): string | undefined {
     return ChannelStore.getChannel(channelId)?.guild_id ?? undefined;
@@ -211,8 +348,7 @@ function bodyText(m: any, withEmbeds: boolean): string {
     const parts: string[] = [];
     if (m.content) parts.push(m.content);
     if (withEmbeds) {
-        for (const e of m.embeds ?? []) {
-            if (e.type !== "rich") continue;
+        for (const e of richEmbeds(m)) {
             const line = [e.title, e.description].filter(Boolean).join(" — ");
             if (line) parts.push(`> ${line.replace(/\n/g, "\n> ")}`);
         }
@@ -220,106 +356,6 @@ function bodyText(m: any, withEmbeds: boolean): string {
     for (const s of m.sticker_items ?? []) parts.push(`[sticker: ${s.name}]`);
     if (!USER_TYPES.has(m.type) && !m.content) parts.push(`[system message, type ${m.type}]`);
     return parts.join("\n");
-}
-
-async function download(url: string, name: string): Promise<File> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`download ${name}: HTTP ${res.status}`);
-    return new File([await res.blob()], name);
-}
-
-function uploadOne(channelId: string, file: File): Promise<{ filename: string; uploaded_filename: string; }> {
-    return new Promise((resolve, reject) => {
-        const upload = new CloudUpload({ file, isThumbnail: false, platform: CloudUploadPlatform.WEB }, channelId);
-        // CloudUpload may never settle; don't let that freeze the job
-        const timer = setTimeout(() => reject(new Error(`upload ${file.name} timed out`)), 120_000);
-        upload.on("complete", () => {
-            clearTimeout(timer);
-            resolve({ filename: upload.filename, uploaded_filename: upload.uploadedFilename });
-        });
-        upload.on("error", (err: any) => {
-            clearTimeout(timer);
-            reject(err ?? new Error("upload error"));
-        });
-        upload.upload();
-    });
-}
-
-/**
- * Re-host a message's attachments through `take`. Files that cannot be
- * re-hosted become links — except before a delete (Move / Delete): a CDN link
- * dies with the source message, so that throws and the source is kept.
- */
-async function gatherFiles<T>(m: any, opts: RunOptions, take: (f: File) => Promise<T>): Promise<{ items: T[]; links: string[]; }> {
-    const strict = isDestructive(opts.action);
-    const limit = opts.maxUploadMb * 1024 * 1024;
-    const items: T[] = [];
-    const links: string[] = [];
-    for (const att of (m.attachments ?? []).slice(0, 10)) {
-        const name = att.filename || "file";
-        let why = "";
-        if (!opts.reuploadFiles) why = "re-upload is off";
-        else if ((att.size ?? 0) > limit) why = `bigger than ${opts.maxUploadMb} MB`;
-        else {
-            try {
-                items.push(await take(await download(att.url, name)));
-                continue;
-            } catch (e) {
-                why = errorText(e);
-            }
-        }
-        if (strict) throw new Error(`attachment ${name} not re-uploaded (${why}); source kept`);
-        links.push(att.url);
-    }
-    return { items, links };
-}
-
-async function postText(channelId: string, content: string, attachments: any[] = []) {
-    await withRetry(() => RestAPI.post({
-        url: Constants.Endpoints.MESSAGES(channelId),
-        body: {
-            content,
-            nonce: SnowflakeUtils.fromTimestamp(Date.now()),
-            tts: false,
-            flags: 0,
-            allowed_mentions: NO_PINGS,
-            ...(attachments.length ? { attachments: attachments.map((a, i) => ({ id: String(i), ...a })) } : {})
-        }
-    }), job, onWait);
-}
-
-/** Native Discord forward of the original message */
-export async function forwardMessage(targetId: string, m: any, sourceChannelId: string) {
-    const guildId = guildOf(sourceChannelId);
-    await withRetry(() => RestAPI.post({
-        url: Constants.Endpoints.MESSAGES(targetId),
-        body: {
-            content: "",
-            nonce: SnowflakeUtils.fromTimestamp(Date.now()),
-            tts: false,
-            flags: 0,
-            message_reference: {
-                type: MessageReferenceType.FORWARD,
-                message_id: m.id,
-                channel_id: sourceChannelId,
-                ...(guildId ? { guild_id: guildId } : {})
-            }
-        }
-    }), job, onWait);
-}
-
-/** Repost as yourself: header + text + re-uploaded attachments (see gatherFiles) */
-export async function copyMessage(targetId: string, m: any, sourceChannelId: string, opts: RunOptions) {
-    const header = opts.copyHeader
-        ? `-# **${displayName(m)}** · <t:${Math.floor(snowflakeTime(m.id) / 1000)}:f> · ${jumpLink(m, sourceChannelId)}`
-        : "";
-    const { items: uploads, links } = await gatherFiles(m, opts, f => uploadOne(targetId, f));
-
-    const text = [header, bodyText(m, true), ...links].filter(Boolean).join("\n");
-    const parts = chunk(text || (uploads.length ? "" : "​"));
-    for (let i = 0; i < parts.length; i++) {
-        await postText(targetId, parts[i], i === parts.length - 1 ? uploads : []);
-    }
 }
 
 function avatarUrl(m: any): string | undefined {
@@ -347,60 +383,222 @@ function cleanEmbed(e: any) {
     };
 }
 
-async function webhookPost(url: string, payload: any, files: File[]) {
-    await withRetry(async () => {
-        const form = new FormData();
-        form.append("payload_json", JSON.stringify(payload));
-        files.forEach((f, i) => form.append(`files[${i}]`, f, f.name));
-        const res = await fetch(`${url}?wait=true`, { method: "POST", body: form });
-        if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw { status: res.status, body };
-        }
-    }, job, onWait);
+interface Post {
+    /** forward: the source message id */
+    forward?: string;
+    content: string;
+    files: File[];
+    embeds?: any[];
 }
 
-/** Clone under the original author's name + avatar through a webhook (needs Manage Webhooks to create one) */
-export async function webhookMessage(url: string, m: any, sourceChannelId: string, opts: RunOptions) {
-    const { items: files, links } = await gatherFiles(m, opts, async f => f);
-    const header = opts.copyHeader ? `-# <t:${Math.floor(snowflakeTime(m.id) / 1000)}:f> · ${jumpLink(m, sourceChannelId)}` : "";
-    const embeds = (m.embeds ?? []).filter((e: any) => e.type === "rich").slice(0, 10).map(cleanEmbed);
-    const text = [header, bodyText(m, false), ...links].filter(Boolean).join("\n");
-    const parts = chunk(text);
-    const base = { username: webhookName(m), avatar_url: avatarUrl(m), allowed_mentions: NO_PINGS };
+interface Ctx {
+    opts: RunOptions;
+    limiter: Limiter;
+    report: Report;
+    uploadLimit: number;
+    /** error that stops the writer */
+    fatal?: ApiError;
+}
 
-    for (let i = 0; i < parts.length; i++) {
+/**
+ * Download what a group needs (runs a few groups ahead of the writer). Files
+ * that cannot be re-hosted become links — except on Move: a CDN link dies with
+ * the source message, so that fails the group and its sources are kept.
+ */
+async function prepare(ctx: Ctx, group: any[]): Promise<Post[]> {
+    const { opts } = ctx;
+    if (opts.style === "forward") return group.map(m => ({ forward: m.id, content: "", files: [] }));
+
+    const strict = opts.action === "move";
+    const atts = group.flatMap(m => m.attachments ?? []).slice(0, 10);
+    const files: File[] = [];
+    const links: string[] = [];
+    const got = await Promise.all(atts.map(async (a: any) => {
+        const name = a.filename || "file";
+        if ((a.size ?? 0) > ctx.uploadLimit) return { a, why: `bigger than the ${Math.round(ctx.uploadLimit / MB)} MB upload limit` };
+        try {
+            return { a, file: await download(a.url, name, job) };
+        } catch (e: any) {
+            if (e instanceof AbortedError) throw e;
+            return { a, why: e?.message ?? String(e) };
+        }
+    }));
+    for (const g of got) {
+        if (g.file) files.push(g.file);
+        else if (strict) throw new Error(`attachment ${g.a.filename} not re-uploaded (${g.why}); source kept`);
+        else links.push(g.a.url);
+    }
+
+    const first = group[0];
+    const when = `<t:${Math.floor(snowflakeTime(first.id) / 1000)}:f>`;
+    // a jump link to a message that is about to be deleted is useless
+    const link = opts.action === "copy" ? ` · ${jumpLink(first, opts.selection.channelId)}` : "";
+    const header = !opts.originLine ? ""
+        : opts.style === "repost" ? `-# **${displayName(first)}** · ${when}${link}` : `-# ${when}${link}`;
+    const body = group.map(m => bodyText(m, opts.style === "repost")).filter(Boolean).join("\n");
+    const embeds = opts.style === "clone" ? group.flatMap(richEmbeds).slice(0, 10).map(cleanEmbed) : [];
+
+    const parts = chunk([header, body, ...links].filter(Boolean).join("\n"));
+    return parts.map((content, i) => {
         const last = i === parts.length - 1;
-        const payload: any = { ...base, content: parts[i] };
-        if (last && embeds.length) payload.embeds = embeds;
-        if (!payload.content && !payload.embeds && !(last && files.length)) payload.content = "​";
-        await webhookPost(url.trim(), payload, last ? files : []);
+        const post: Post = { content, files: last ? files : [] };
+        if (last && embeds.length) post.embeds = embeds;
+        if (!post.content && !post.files.length && !post.embeds) post.content = "​";
+        return post;
+    });
+}
+
+function uploadOne(channelId: string, file: File): Promise<{ filename: string; uploaded_filename: string; }> {
+    return new Promise((resolve, reject) => {
+        const upload = new CloudUpload({ file, isThumbnail: false, platform: CloudUploadPlatform.WEB }, channelId);
+        // CloudUpload may never settle; don't let that freeze the job
+        const timer = setTimeout(() => reject(new Error(`upload ${file.name} timed out`)), 300_000);
+        upload.on("complete", () => {
+            clearTimeout(timer);
+            resolve({ filename: upload.filename, uploaded_filename: upload.uploadedFilename });
+        });
+        upload.on("error", (err: any) => {
+            clearTimeout(timer);
+            reject(err ?? new Error("upload error"));
+        });
+        upload.upload();
+    });
+}
+
+let nonceSeq = 0;
+
+function messageBody(content: string) {
+    // unique per post (the low bits of a snowflake are a counter), reused by the
+    // Limiter's retries: with enforce_nonce a retry whose first try did land is not posted twice
+    const nonce = (BigInt(SnowflakeUtils.fromTimestamp(Date.now())) + BigInt(nonceSeq++ & 0xfff)).toString();
+    return { content, nonce, enforce_nonce: true, tts: false, flags: 0, allowed_mentions: NO_PINGS };
+}
+
+async function postRepost(ctx: Ctx, post: Post) {
+    const url = Constants.Endpoints.MESSAGES(ctx.opts.targetChannelId);
+    const body: any = messageBody(post.content);
+    const total = post.files.reduce((n, f) => n + f.size, 0);
+    if (post.files.length && total <= DIRECT_UPLOAD_MAX) {
+        body.attachments = post.files.map((f, i) => ({ id: String(i), filename: f.name }));
+        try {
+            await rest(ctx.limiter, job, "post", url, { body, files: post.files });
+            return;
+        } catch (e) {
+            // too big for a direct upload: fall through to the cloud upload
+            if (!(e instanceof ApiError) || (e.status !== 413 && e.code !== 40005)) throw e;
+        }
+    }
+    if (post.files.length) {
+        const ups: { filename: string; uploaded_filename: string; }[] = [];
+        for (const f of post.files) {
+            if (job.abort) throw new AbortedError();
+            ups.push(await uploadOne(ctx.opts.targetChannelId, f));
+        }
+        body.attachments = ups.map((u, i) => ({ id: String(i), ...u }));
+    }
+    await rest(ctx.limiter, job, "post", url, { body });
+}
+
+async function postForward(ctx: Ctx, messageId: string) {
+    const src = ctx.opts.selection.channelId;
+    const guildId = guildOf(src);
+    await rest(ctx.limiter, job, "post", Constants.Endpoints.MESSAGES(ctx.opts.targetChannelId), {
+        body: {
+            ...messageBody(""),
+            message_reference: {
+                type: MessageReferenceType.FORWARD,
+                message_id: messageId,
+                channel_id: src,
+                ...(guildId ? { guild_id: guildId } : {})
+            }
+        }
+    });
+}
+
+/** The target's "MessageOps" webhook: cached, else found, else created (needs Manage Webhooks) */
+async function webhookFor(ctx: Ctx, fresh: boolean): Promise<string> {
+    const ch = ChannelStore.getChannel(ctx.opts.targetChannelId);
+    const threadId = THREAD_TYPES.has(ch?.type) ? ch.id : undefined;
+    const parentId: string = threadId ? ch.parent_id : ctx.opts.targetChannelId;
+    const cache = ctx.opts.webhookCache;
+
+    let idToken = fresh ? undefined : cache[parentId];
+    if (!idToken) {
+        const list = bodyOf<any[]>(await rest(ctx.limiter, job, "get", `/channels/${parentId}/webhooks`));
+        const mine = (Array.isArray(list) ? list : []).find(w => w?.type === 1 && w.name === WEBHOOK_NAME && w.token);
+        let hook = mine;
+        if (!hook) {
+            try {
+                hook = bodyOf(await rest(ctx.limiter, job, "post", `/channels/${parentId}/webhooks`, { body: { name: WEBHOOK_NAME } }));
+            } catch (e) {
+                if (e instanceof ApiError && e.code === 30007) {
+                    throw new Error("The target channel already has the maximum number of webhooks — delete one or use Repost");
+                }
+                throw e;
+            }
+        }
+        if (!hook?.id || !hook?.token) throw new Error("Could not get a webhook token for the target channel");
+        idToken = `${hook.id}/${hook.token}`;
+        cache[parentId] = idToken;
+    }
+    return `${location.origin}/api/v10/webhooks/${idToken}?wait=true${threadId ? `&thread_id=${threadId}` : ""}`;
+}
+
+async function postClone(ctx: Ctx, post: Post, author: any) {
+    const payload: any = {
+        username: webhookName(author),
+        avatar_url: avatarUrl(author),
+        allowed_mentions: NO_PINGS,
+        content: post.content
+    };
+    if (post.embeds?.length) payload.embeds = post.embeds;
+    if (post.files.length) payload.attachments = post.files.map((f, i) => ({ id: i, filename: f.name }));
+
+    for (let fresh = false; ; fresh = true) {
+        const url = await webhookFor(ctx, fresh);
+        try {
+            await webhookExecute(ctx.limiter, job, url, payload, post.files);
+            return;
+        } catch (e) {
+            // deleted webhook: never reuse it, make a new one once
+            if (!fresh && e instanceof ApiError && (e.code === 10015 || e.status === 404)) continue;
+            throw e;
+        }
     }
 }
 
-export async function deleteMessage(channelId: string, messageId: string) {
-    await withRetry(() => RestAPI.del({ url: `${Constants.Endpoints.MESSAGES(channelId)}/${messageId}` }), job, onWait);
+async function deleteOne(ctx: Ctx, messageId: string) {
+    try {
+        await rest(ctx.limiter, job, "del", `${Constants.Endpoints.MESSAGES(ctx.opts.selection.channelId)}/${messageId}`);
+    } catch (e) {
+        if (e instanceof ApiError && e.code === 10008) return; // already gone
+        throw e;
+    }
 }
 
-/* ---------- backup ---------- */
+/* ---------- export ZIP (Export action + the safety copy before Move / Delete) ---------- */
 
 function safeName(s: string) {
     return s.replace(/[^\w.-]+/g, "_").slice(0, 120) || "file";
 }
 
-export async function buildBackup(plan: Plan, label: string): Promise<File> {
+/**
+ * messages.json + messages.txt + every attachment (parallel downloads, stored
+ * uncompressed). `strict`: a failed download throws, so nothing gets deleted
+ * whose files are not in the ZIP.
+ */
+export async function buildZip(plan: Plan, label: string, strict: boolean, errors: string[]): Promise<File> {
     const { opts, messages } = plan;
     const sel = opts.selection;
-    const files: Record<string, Uint8Array> = {};
-    const limit = opts.maxUploadMb * 1024 * 1024;
+    const zip: Zippable = {};
 
     const txt = messages.map(m => {
         const when = new Date(snowflakeTime(m.id)).toISOString();
-        const atts = (m.attachments ?? []).map((a: any) => `  [file] ${a.filename} ${a.url}`).join("\n");
+        const atts = (m.attachments ?? []).map((a: any) => `  [file] files/${m.id}-${safeName(a.filename || a.id)} ${a.url}`).join("\n");
         return `[${when}] ${m.author?.username ?? "?"} (${m.author?.id ?? "?"}) #${m.id}\n${bodyText(m, true)}${atts ? "\n" + atts : ""}`;
     }).join("\n\n");
 
-    files["manifest.json"] = strToU8(JSON.stringify({
+    zip["manifest.json"] = strToU8(JSON.stringify({
         tool: "Sernicord MessageOps",
         createdAt: new Date().toISOString(),
         action: label,
@@ -410,106 +608,193 @@ export async function buildBackup(plan: Plan, label: string): Promise<File> {
         filters: { ...sel, channelId: undefined },
         count: messages.length
     }, null, 2));
-    files["messages.json"] = strToU8(JSON.stringify(messages, null, 2));
-    files["messages.txt"] = strToU8(txt);
+    zip["messages.json"] = strToU8(JSON.stringify(messages, null, 2));
+    zip["messages.txt"] = strToU8(txt);
 
-    // the pre-Move/Delete ZIP must hold the files: their URLs die with the messages
-    // (no size cap, and a failed download aborts the whole run before anything is deleted)
-    const strict = isDestructive(opts.action);
-    if (opts.backupFiles || strict) {
-        let n = 0;
-        for (const m of messages) {
-            for (const a of m.attachments ?? []) {
-                if (job.abort) throw new AbortedError();
-                if (!strict && (a.size ?? 0) > limit) continue;
-                setStatus(`Backup: downloading files… ${++n}`);
-                try {
-                    const f = await download(a.url, a.filename || "file");
-                    files[`files/${m.id}-${safeName(a.filename || a.id)}`] = new Uint8Array(await f.arrayBuffer());
-                } catch (e) {
-                    if (strict) throw new Error(`backup of ${a.filename} failed (${errorText(e)}); nothing deleted`);
-                    // otherwise keep going; the URL stays in messages.json
-                }
+    const atts = messages.flatMap(m => (m.attachments ?? []).map((a: any) => ({ m, a })));
+    let n = 0;
+    await Promise.all(atts.map(async ({ m, a }) => {
+        try {
+            const f = await download(a.url, a.filename || "file", job);
+            zip[`files/${m.id}-${safeName(a.filename || a.id)}`] = [new Uint8Array(await f.arrayBuffer()), { level: 0 }];
+        } catch (e: any) {
+            if (e instanceof AbortedError || strict) {
+                throw e instanceof AbortedError ? e : new Error(`backup of ${a.filename} failed (${e?.message ?? e}); nothing deleted`);
             }
+            errors.push(`ZIP: ${a.filename}: ${e?.message ?? e} (URL kept in messages.json)`);
         }
-    }
+        setStatus(`ZIP: files ${++n}/${atts.length}`);
+    }));
 
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    return new File([zipSync(files)], `msgops-${label}-${sel.channelId}-${stamp}.zip`, { type: "application/zip" });
+    return new File([zipSync(zip)], `msgops-${label}-${sel.channelId}-${stamp}.zip`, { type: "application/zip" });
 }
 
 /* ---------- pipeline ---------- */
 
-export interface Report {
-    done: number;
-    failed: number;
-    errors: string[];
-    aborted: boolean;
+function fmtTime(ms: number) {
+    const s = Math.round(ms / 1000);
+    return s < 90 ? `${s}s` : s < 5400 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`;
 }
 
-async function mirror(m: any, opts: RunOptions) {
-    const src = opts.selection.channelId;
-    if (opts.mirrorMode === "forward" || opts.mirrorMode === "both") await forwardMessage(opts.mirrorChannelId, m, src);
-    if (opts.mirrorMode === "copy" || opts.mirrorMode === "both") await copyMessage(opts.mirrorChannelId, m, src, opts);
+function errText(e: any) {
+    return e?.message ?? String(e);
 }
 
-async function transfer(m: any, opts: RunOptions) {
-    const src = opts.selection.channelId;
-    if (opts.transferMode === "forward") await forwardMessage(opts.targetChannelId, m, src);
-    else if (opts.transferMode === "copy") await copyMessage(opts.targetChannelId, m, src, opts);
-    else await webhookMessage(opts.webhookUrl, m, src, opts);
-}
+/** Deletes source messages one by one, fed while the writer is still posting */
+class DeleteQueue {
+    private ids: string[] = [];
+    private closed = false;
+    private wake?: () => void;
+    done: Promise<void>;
+    /** ids that were queued but not deleted when the queue ended early */
+    left = 0;
 
-/**
- * Per message, oldest first: mirror → transfer → delete. Fail-closed: a source
- * message is only deleted when every earlier step for it succeeded.
- */
-export async function execute(plan: Plan): Promise<Report> {
-    const { opts, messages } = plan;
-    const { action } = opts;
-    const report: Report = { done: 0, failed: 0, errors: [], aborted: false };
+    constructor(private ctx: Ctx, private onTick: () => void, private stopOnSoft: boolean) {
+        this.done = this.loop();
+    }
 
-    try {
-        // a failed auto-backup throws here, before anything is deleted
-        if (action === "backup" || (isDestructive(action) && opts.autoBackup && !opts.dryRun)) {
-            setStatus("Building backup ZIP…");
-            const zip = await buildBackup(plan, action === "backup" ? "backup" : `pre-${action}`);
-            saveFile(zip);
-            if (action === "backup" && opts.uploadBackupToMirror && isSnowflake(opts.mirrorChannelId) && !opts.dryRun) {
-                setStatus("Uploading backup ZIP to the mirror channel…");
-                try {
-                    const up = await uploadOne(opts.mirrorChannelId, zip);
-                    await postText(opts.mirrorChannelId, `-# MessageOps backup · ${messages.length} message(s) from <#${opts.selection.channelId}>`, [up]);
-                } catch (e) {
-                    report.errors.push(`ZIP upload: ${errorText(e)} (too big? it is saved locally)`);
+    push(ids: string[]) {
+        this.ids.push(...ids);
+        this.wake?.();
+    }
+
+    close() {
+        this.closed = true;
+        this.wake?.();
+    }
+
+    private async loop() {
+        const { report } = this.ctx;
+        try {
+            for (; ;) {
+                if (this.stopOnSoft && job.stopping) break;
+                const id = this.ids.shift();
+                if (!id) {
+                    if (this.closed) break;
+                    await new Promise<void>(r => { this.wake = r; });
+                    this.wake = undefined;
+                    continue;
                 }
+                try {
+                    await deleteOne(this.ctx, id);
+                    report.deleted++;
+                } catch (e) {
+                    if (e instanceof AbortedError) throw e;
+                    report.failed++;
+                    if (report.errors.length < 20) report.errors.push(`delete ${id}: ${errText(e)}`);
+                    if (e instanceof ApiError && e.fatal) {
+                        report.fatal ??= `delete: ${e.message}`;
+                        this.ctx.fatal ??= e;
+                        break;
+                    }
+                }
+                this.onTick();
+            }
+        } catch (e) {
+            if (!(e instanceof AbortedError)) throw e;
+            report.aborted = true;
+        } finally {
+            this.left = this.ids.length;
+        }
+    }
+}
+
+const PREFETCH = 3;
+
+async function writer(ctx: Ctx, groups: any[][], deleter: DeleteQueue | null, onTick: () => void) {
+    const { report, opts } = ctx;
+    const ahead: { group: any[]; posts: Promise<Post[]>; }[] = [];
+    let next = 0;
+    const fill = () => {
+        while (ahead.length < PREFETCH && next < groups.length) {
+            const group = groups[next++];
+            const posts = prepare(ctx, group);
+            posts.catch(() => { }); // handled when its turn comes
+            ahead.push({ group, posts });
+        }
+    };
+
+    for (let i = 0; i < groups.length; i++) {
+        if (job.abort) throw new AbortedError();
+        if (job.stopping || ctx.fatal) break;
+        fill();
+        const { group, posts } = ahead.shift()!;
+        try {
+            for (const post of await posts) {
+                if (post.forward) await postForward(ctx, post.forward);
+                else if (opts.style === "clone") await postClone(ctx, post, group[0]);
+                else await postRepost(ctx, post);
+                report.posts++;
+            }
+            report.done += group.length;
+            deleter?.push(group.map(m => m.id));
+        } catch (e) {
+            if (e instanceof AbortedError) throw e;
+            report.failed += group.length;
+            if (report.errors.length < 20) report.errors.push(`${group[0].id}${group.length > 1 ? ` (+${group.length - 1})` : ""}: ${errText(e)}`);
+            if (e instanceof ApiError && e.fatal) {
+                report.fatal ??= e.message;
+                ctx.fatal ??= e;
             }
         }
+        onTick();
+    }
+}
 
-        const writes = !opts.dryRun && (action !== "backup" || opts.mirrorMode !== "off");
-        if (action === "preview" || !writes) {
+export async function execute(plan: Plan): Promise<Report> {
+    const { opts, messages, groups, limiter } = plan;
+    const { action } = opts;
+    const report: Report = { done: 0, posts: 0, deleted: 0, failed: 0, notDeleted: 0, errors: [], aborted: false };
+    const ctx: Ctx = { opts, limiter, report, uploadLimit: uploadLimit(opts) };
+    const started = Date.now();
+
+    const progress = () => {
+        const total = messages.length;
+        const work = action === "delete" ? report.deleted + report.failed : report.done + report.failed;
+        const rate = work / Math.max(1, (Date.now() - started) / 60_000);
+        const eta = work > 0 && work < total ? ` · ETA ${fmtTime((total - work) / rate * 60_000)}` : "";
+        const del = action === "move" ? ` · deleted ${report.deleted}` : "";
+        const lim = limiter.stats.limited ? ` · 429×${limiter.stats.limited}` : "";
+        return `${action}: ${work}/${total}${del} · failed ${report.failed} · ${rate.toFixed(0)}/min${eta}${lim}`;
+    };
+    // wait notices from the limiter use the live counters
+    limiter.onWait = (ms, why) => setStatus(`${progress()} · ${why}, waiting ${(ms / 1000).toFixed(1)}s`);
+    const tick = () => setStatus(progress());
+
+    try {
+        if (action === "export" || (isDestructive(action) && opts.safetyZip)) {
+            setStatus("Building ZIP…");
+            const zip = await buildZip(plan, action === "export" ? "export" : `pre-${action}`, action !== "export", report.errors);
+            saveFile(zip);
+            report.zip = zip.name;
+        }
+        if (action === "preview" || action === "export") {
             report.done = messages.length;
             return report;
         }
 
-        for (let i = 0; i < messages.length; i++) {
-            const m = messages[i];
-            setStatus(`${action}: ${i + 1}/${messages.length} · ok ${report.done} · failed ${report.failed}`);
-            try {
-                if (opts.mirrorMode !== "off") await mirror(m, opts);
-                if (action === "copy" || action === "move") await transfer(m, opts);
-                if (isDestructive(action)) await deleteMessage(opts.selection.channelId, m.id);
-                report.done++;
-            } catch (e) {
-                if (e instanceof AbortedError) throw e;
-                report.failed++;
-                if (report.errors.length < 20) report.errors.push(`${m.id}: ${errorText(e)}`);
-            }
-            if (i < messages.length - 1) await pause(opts.delayMs, job);
+        if (action === "delete") {
+            const deleter = new DeleteQueue(ctx, tick, true);
+            deleter.push(messages.map(m => m.id));
+            deleter.close();
+            await deleter.done;
+            report.done = report.deleted;
+            return report;
+        }
+
+        const deleter = action === "move" ? new DeleteQueue(ctx, tick, false) : null;
+        try {
+            await writer(ctx, groups, deleter, tick);
+        } finally {
+            // already-copied sources still get deleted after a soft stop or a writer error
+            deleter?.close();
+            await deleter?.done;
         }
     } catch (e) {
         if (!(e instanceof AbortedError)) throw e;
         report.aborted = true;
     }
+    if (action === "move") report.notDeleted = Math.max(0, report.done - report.deleted);
     return report;
 }

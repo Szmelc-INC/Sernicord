@@ -1,13 +1,15 @@
 /*
- * Sernicord MessageOps — move / clone / backup / bulk-delete message ranges
+ * Sernicord MessageOps — move / copy / export / bulk-delete message ranges
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Pick a channel, mark the first and last message of a range (right-click →
- * MessageOps), narrow it down (authors, text, regex, files, bots, pins) and run
- * one action on it: preview, ZIP backup, copy, move or delete. Every action can
- * also mirror each message into a log channel (native forward and/or a copy)
- * before it is touched. Writes are fail-closed: a source message is only
- * deleted after its mirror and transfer succeeded.
+ * Pick a source (right-click → MessageOps: range start / end, or a whole
+ * channel), narrow it down (authors, text or /regex/, files, bots, pins) and
+ * run one action: Preview, Export (ZIP with files), Copy, Move or Delete.
+ * Copy / Move land in one target channel as a native forward, a repost or a
+ * webhook clone (original name + avatar; the webhook is created for you).
+ * Requests are paced by Discord's rate limit headers (see limiter.ts), posts
+ * and deletes run as two parallel queues, and a Move only deletes a source
+ * message after its copy landed.
  */
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
@@ -20,17 +22,21 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Alerts, ChannelStore, Menu, React, showToast, useEffect, useState } from "@webpack/common";
 
 import { isSnowflake, snowflakeTime } from "./api";
-import { Action, collect, execute, job, MirrorMode, parseIds, Plan, RunOptions, setStatus, TransferMode } from "./ops";
+import {
+    Action, collect, execute, isDestructive, isTransfer, job, parseIds, Plan, Report, RunOptions, setStatus, Speed, Style
+} from "./ops";
 
 const Author = { name: "sernik", id: 0n };
 
 const ACTIONS: { id: Action; label: string; variant: "secondary" | "primary" | "dangerPrimary"; }[] = [
     { id: "preview", label: "Preview", variant: "secondary" },
-    { id: "backup", label: "Backup ZIP", variant: "primary" },
+    { id: "export", label: "Export ZIP", variant: "primary" },
     { id: "copy", label: "Copy", variant: "primary" },
     { id: "move", label: "Move", variant: "dangerPrimary" },
     { id: "delete", label: "Delete", variant: "dangerPrimary" }
 ];
+
+const STYLE_LABEL: Record<Style, string> = { forward: "forward", repost: "repost", clone: "webhook clone" };
 
 /* ---------- settings ---------- */
 
@@ -41,37 +47,32 @@ export const settings = definePluginSettings({
     },
     channelId: {
         type: OptionType.STRING,
-        description: "Source channel ID (set automatically by right-click → MessageOps)",
+        description: "Source channel ID (set by right-click → MessageOps)",
         default: ""
     },
     startId: {
         type: OptionType.STRING,
-        description: "Range start: message ID of the first message (empty = channel beginning)",
+        description: "Range start: first message ID (empty = channel beginning)",
         default: ""
     },
     endId: {
         type: OptionType.STRING,
-        description: "Range end: message ID of the last message (empty = newest)",
+        description: "Range end: last message ID (empty = newest)",
         default: ""
     },
     authorIds: {
         type: OptionType.STRING,
-        description: "Only these authors: user IDs or mentions, comma/space separated (empty = everyone)",
+        description: "Filter — only these authors: user IDs or mentions (empty = everyone)",
         default: ""
     },
-    contains: {
+    text: {
         type: OptionType.STRING,
-        description: "Only messages containing this text (case-insensitive)",
-        default: ""
-    },
-    regex: {
-        type: OptionType.STRING,
-        description: "Only messages matching this regex (JS syntax, flags \"iu\")",
+        description: "Filter — only messages containing this text, or /regex/flags",
         default: ""
     },
     attachments: {
         type: OptionType.SELECT,
-        description: "Attachments filter",
+        description: "Filter — attachments",
         options: [
             { label: "Any message", value: "any", default: true },
             { label: "Only with attachments", value: "with" },
@@ -80,7 +81,7 @@ export const settings = definePluginSettings({
     },
     bots: {
         type: OptionType.SELECT,
-        description: "Bots / webhooks",
+        description: "Filter — bots / webhooks",
         options: [
             { label: "Include", value: "include", default: true },
             { label: "Exclude", value: "exclude" },
@@ -89,92 +90,60 @@ export const settings = definePluginSettings({
     },
     skipPinned: {
         type: OptionType.BOOLEAN,
-        description: "Skip pinned messages",
+        description: "Filter — skip pinned messages",
         default: true
     },
     includeSystem: {
         type: OptionType.BOOLEAN,
-        description: "Include system messages (joins, boosts, pins…). They cannot be forwarded",
+        description: "Filter — include system messages (joins, boosts, pins…); they cannot be forwarded",
         default: false
     },
     maxCount: {
         type: OptionType.NUMBER,
-        description: "Stop after this many matching messages (0 = no cap)",
+        description: "Filter — stop after this many matching messages (0 = no cap)",
         default: 0
-    },
-    transferMode: {
-        type: OptionType.SELECT,
-        description: "Copy / Move: how messages land in the target",
-        options: [
-            { label: "Native forward (keeps the original card)", value: "forward", default: true },
-            { label: "Copy as me (text + re-uploaded files + header)", value: "copy" },
-            { label: "Webhook clone (original name + avatar)", value: "webhook" }
-        ]
     },
     targetChannelId: {
         type: OptionType.STRING,
-        description: "Copy / Move: target channel ID (forward and copy modes)",
+        description: "Copy / Move — target channel or thread ID (right-click a channel → MessageOps → Set as target)",
         default: ""
     },
-    webhookUrl: {
-        type: OptionType.STRING,
-        description: "Copy / Move: target webhook URL (webhook mode). Stored in plain text",
-        default: ""
-    },
-    mirrorMode: {
+    style: {
         type: OptionType.SELECT,
-        description: "Every action: mirror each message into the mirror channel before touching it",
+        description: "Copy / Move — how messages land in the target",
         options: [
-            { label: "Off", value: "off", default: true },
-            { label: "Forward", value: "forward" },
-            { label: "Copy", value: "copy" },
-            { label: "Forward + copy", value: "both" }
+            { label: "Forward — native forward card, 1 request per message", value: "forward", default: true },
+            { label: "Repost — as you: text + re-uploaded files", value: "repost" },
+            { label: "Clone — webhook with the original name + avatar (needs Manage Webhooks, created for you)", value: "clone" }
         ]
     },
-    mirrorChannelId: {
-        type: OptionType.STRING,
-        description: "Mirror / log channel ID",
-        default: ""
-    },
-    dryRun: {
+    merge: {
         type: OptionType.BOOLEAN,
-        description: "Dry run: only count (Backup still saves the ZIP locally). Nothing is posted or deleted",
+        description: "Repost / Clone — merge consecutive messages of one author into one post (far fewer requests)",
         default: true
     },
-    delayMs: {
-        type: OptionType.NUMBER,
-        description: "Pause between messages in ms (keep it high; Discord flags fast mass actions)",
-        default: 2500
-    },
-    copyHeader: {
+    originLine: {
         type: OptionType.BOOLEAN,
-        description: "Copies: add a small header (author, time, jump link)",
+        description: "Repost / Clone — add a small origin line (author, time; Copy also links the original)",
         default: true
     },
-    reuploadFiles: {
+    safetyZip: {
         type: OptionType.BOOLEAN,
-        description: "Copies: re-upload attachments (off = post their links)",
+        description: "Move / Delete — save a ZIP of everything (with files) first; a failed download cancels the run",
         default: true
     },
-    maxUploadMb: {
-        type: OptionType.NUMBER,
-        description: "Largest file to re-upload / put in the ZIP, in MB (bigger ones become links)",
-        default: 10
+    speed: {
+        type: OptionType.SELECT,
+        description: "Pacing — requests always follow Discord's rate limit headers; this adds a minimum gap between writes",
+        options: [
+            { label: "Fast — headers only", value: "fast" },
+            { label: "Normal — at least 0.5 s between writes", value: "normal", default: true },
+            { label: "Careful — at least 2 s between writes", value: "careful" }
+        ]
     },
-    autoBackup: {
-        type: OptionType.BOOLEAN,
-        description: "Move / Delete: save a ZIP of everything selected (with all files) before starting; a failed download stops the run",
-        default: true
-    },
-    backupFiles: {
-        type: OptionType.BOOLEAN,
-        description: "Backups: download attachments into the ZIP too",
-        default: false
-    },
-    uploadBackupToMirror: {
-        type: OptionType.BOOLEAN,
-        description: "Backup: also upload the ZIP into the mirror channel",
-        default: false
+    webhookCache: {
+        type: OptionType.CUSTOM,
+        default: {} as Record<string, string>
     }
 });
 
@@ -184,27 +153,20 @@ function optionsFor(action: Action, over: Overrides = {}): RunOptions {
     const s = settings.store;
     return {
         action,
-        dryRun: s.dryRun,
-        transferMode: s.transferMode as TransferMode,
         targetChannelId: s.targetChannelId.trim(),
-        webhookUrl: s.webhookUrl.trim(),
-        mirrorMode: s.mirrorMode as MirrorMode,
-        mirrorChannelId: s.mirrorChannelId.trim(),
-        delayMs: Math.max(0, s.delayMs || 0),
-        copyHeader: s.copyHeader,
-        reuploadFiles: s.reuploadFiles,
-        maxUploadMb: Math.max(1, s.maxUploadMb || 10),
-        autoBackup: s.autoBackup,
-        backupFiles: s.backupFiles,
-        uploadBackupToMirror: s.uploadBackupToMirror,
+        style: s.style as Style,
+        merge: s.merge,
+        originLine: s.originLine,
+        safetyZip: s.safetyZip,
+        speed: s.speed as Speed,
+        webhookCache: s.webhookCache,
         ...over,
         selection: {
             channelId: s.channelId.trim(),
             startId: s.startId.trim(),
             endId: s.endId.trim(),
             authorIds: parseIds(s.authorIds),
-            contains: s.contains,
-            regex: s.regex,
+            text: s.text,
             attachments: s.attachments as any,
             bots: s.bots as any,
             skipPinned: s.skipPinned,
@@ -223,7 +185,7 @@ function confirmRun(title: string, body: string): Promise<boolean> {
         const done = (v: boolean) => { if (!settled) { settled = true; resolve(v); } };
         Alerts.show({
             title,
-            body: <Paragraph>{body}</Paragraph>,
+            body: <Paragraph style={{ whiteSpace: "pre-line" }}>{body}</Paragraph>,
             confirmText: "Run it",
             cancelText: "Cancel",
             onConfirm: () => done(true),
@@ -234,21 +196,32 @@ function confirmRun(title: string, body: string): Promise<boolean> {
 }
 
 function describePlan(plan: Plan): string {
-    const { opts, messages, scanned, noPermission } = plan;
-    const where = opts.action === "copy" || opts.action === "move"
-        ? opts.transferMode === "webhook" ? " → webhook" : ` → <#${opts.targetChannelId}> (${opts.transferMode})`
-        : "";
-    const mirror = opts.mirrorMode !== "off" ? `, mirror ${opts.mirrorMode} → <#${opts.mirrorChannelId}>` : "";
-    const perm = noPermission ? `, ${noPermission} skipped (not yours, no Manage Messages)` : "";
-    return `${opts.action}${where}${mirror}: ${messages.length} matched of ${scanned} scanned${perm}`;
+    const { opts, messages, groups, scanned, noPermission } = plan;
+    const lines = [`${messages.length} matched of ${scanned} scanned`];
+    if (noPermission) lines.push(`${noPermission} skipped: not yours and no Manage Messages`);
+    if (isTransfer(opts.action)) {
+        const merged = groups.length < messages.length ? `, merged into ${groups.length} post(s)` : "";
+        lines.push(`→ <#${opts.targetChannelId}> as ${STYLE_LABEL[opts.style]}${merged}`);
+    }
+    if (opts.action === "move") lines.push("each source is deleted right after its copy landed");
+    if (isDestructive(opts.action)) lines.push(opts.safetyZip ? "a ZIP with all files is saved first" : "NO safety ZIP (turned off)");
+    return lines.join("\n");
 }
 
-function needsConfirm(opts: RunOptions): boolean {
-    if (opts.dryRun || opts.action === "preview") return false;
-    return opts.action !== "backup" || opts.mirrorMode !== "off" || opts.uploadBackupToMirror;
+function summarize(opts: RunOptions, r: Report): string {
+    const what = opts.action === "move" ? `moved ${r.done}, deleted ${r.deleted}`
+        : opts.action === "delete" ? `deleted ${r.deleted}`
+            : opts.action === "copy" ? `copied ${r.done} in ${r.posts} post(s)`
+                : `${r.done} message(s)`;
+    const state = r.aborted ? "stopped" : r.fatal ? "stopped early" : job.stopping ? "stopped" : "done";
+    const parts = [`MessageOps — ${opts.action} ${state}: ${what}, failed ${r.failed}`];
+    if (r.notDeleted) parts.push(`${r.notDeleted} copied but NOT deleted from the source`);
+    if (r.zip) parts.push(`ZIP: ${r.zip}`);
+    if (r.fatal) parts.push(`reason: ${r.fatal}`);
+    return [parts.join(" · "), ...r.errors.slice(0, 5)].join("\n");
 }
 
-/** Shared by the panel and /msgops. `say` gets the final summary line. */
+/** Shared by the panel and /msgops. `say` gets the final summary. */
 async function run(opts: RunOptions, say?: (text: string) => void): Promise<void> {
     if (job.running) {
         showToast({ text: "MessageOps: a job is already running", variant: "critical" });
@@ -256,37 +229,49 @@ async function run(opts: RunOptions, say?: (text: string) => void): Promise<void
     }
     job.running = true;
     job.abort = false;
+    job.stopping = false;
     let summary = "";
+    let bad = false;
     try {
         setStatus("Scanning…");
         const plan = await collect(opts);
         const head = describePlan(plan);
-        if (plan.messages.length === 0) {
-            summary = `MessageOps — ${head}. Nothing to do.`;
+        if (plan.messages.length === 0 || opts.action === "preview") {
+            summary = `MessageOps — ${opts.action}: ${head.replace(/\n/g, " · ")}`;
             return;
         }
-        if (needsConfirm(opts)) {
-            setStatus(`Waiting for confirmation — ${head}`);
-            const ok = await confirmRun(
-                `MessageOps: ${opts.action} ${plan.messages.length} message(s)?`,
-                `${head}.${opts.action === "move" || opts.action === "delete" ? " Deleted messages cannot be restored." : ""}`
-            );
+        if (opts.action !== "export") {
+            setStatus("Waiting for confirmation…");
+            const ok = await confirmRun(`MessageOps: ${opts.action} ${plan.messages.length} message(s)?`, head);
             if (!ok) {
-                summary = `MessageOps — cancelled (${head})`;
+                summary = "MessageOps — cancelled";
                 return;
             }
         }
         const r = await execute(plan);
-        const mode = opts.dryRun && opts.action !== "preview" ? " (dry run)" : "";
-        summary = `MessageOps — ${r.aborted ? "stopped" : "done"}${mode}: ${head}; ok ${r.done}, failed ${r.failed}`
-            + (r.errors.length ? `\n${r.errors.slice(0, 5).join("\n")}` : "");
+        summary = summarize(opts, r);
+        bad = r.failed > 0 || !!r.fatal || r.notDeleted > 0;
     } catch (e: any) {
         summary = job.abort ? "MessageOps — stopped" : `MessageOps — error: ${e?.message ?? e}`;
+        bad = !job.abort;
     } finally {
         job.running = false;
+        job.stopping = false;
         setStatus(summary.split("\n")[0] || "Idle");
-        showToast({ text: summary.split("\n")[0], variant: /error|failed [1-9]/.test(summary) ? "critical" : "success" });
+        showToast({ text: summary.split("\n")[0], variant: bad ? "critical" : "success" });
         say?.(summary);
+    }
+}
+
+/** First click: finish what is in flight (a Move still deletes what it already copied). Second click: now. */
+function stop() {
+    if (!job.running) return;
+    if (job.stopping) {
+        job.abort = true;
+        setStatus("Stopping now…");
+    } else {
+        job.stopping = true;
+        setStatus("Stopping after the current message… (click Stop again to stop at once)");
     }
 }
 
@@ -307,25 +292,29 @@ function idLabel(id: string) {
     return `${id} · ${new Date(snowflakeTime(id)).toLocaleString()}`;
 }
 
+function channelLabel(id: string) {
+    if (!id) return "—";
+    const c = ChannelStore.getChannel(id);
+    return c ? `#${c.name || c.id}` : id;
+}
+
 function Panel() {
-    const s = settings.use(["channelId", "startId", "endId", "dryRun", "authorIds", "mirrorMode"]);
+    const s = settings.use(["channelId", "startId", "endId", "authorIds", "text", "targetChannelId", "style"]);
     const j = useJobStatus();
-    const channel = s.channelId ? ChannelStore.getChannel(s.channelId) : null;
     const authors = parseIds(s.authorIds);
+    const line = (text: string) => <Paragraph style={{ fontSize: 13, margin: "4px 0" }}>{text}</Paragraph>;
 
     return (
         <div style={{ padding: 12, borderRadius: 8, background: "var(--background-secondary)", marginBottom: 16 }}>
-            <Heading tag="h5">Selection</Heading>
-            <Paragraph style={{ fontSize: 13, margin: "4px 0" }}>
-                Channel: {channel ? `#${channel.name ?? channel.id}` : s.channelId || "— (right-click a message → MessageOps)"}
-            </Paragraph>
-            <Paragraph style={{ fontSize: 13, margin: "4px 0" }}>Start: {idLabel(s.startId)}</Paragraph>
-            <Paragraph style={{ fontSize: 13, margin: "4px 0" }}>End: {idLabel(s.endId)}</Paragraph>
-            <Paragraph style={{ fontSize: 13, margin: "4px 0 10px" }}>
-                Authors: {authors.length ? authors.join(", ") : "everyone"} · Mirror: {s.mirrorMode} · {s.dryRun ? "DRY RUN" : "LIVE"}
-            </Paragraph>
+            <Heading tag="h5">Source</Heading>
+            {line(`Channel: ${s.channelId ? channelLabel(s.channelId) : "— (right-click a message or channel → MessageOps)"}`)}
+            {line(`From: ${idLabel(s.startId)}`)}
+            {line(`To: ${idLabel(s.endId)}`)}
+            {line(`Authors: ${authors.length ? authors.join(", ") : "everyone"}${s.text ? ` · text: ${s.text}` : ""}`)}
+            <Heading tag="h5" style={{ marginTop: 8 }}>Target (Copy / Move)</Heading>
+            {line(`${channelLabel(s.targetChannelId)} as ${STYLE_LABEL[s.style as Style] ?? s.style}`)}
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
                 {ACTIONS.map(a => (
                     <Button
                         key={a.id}
@@ -337,14 +326,19 @@ function Panel() {
                         {a.label}
                     </Button>
                 ))}
-                <Button size="small" variant="dangerSecondary" disabled={!j.running} onClick={() => { job.abort = true; setStatus("Stopping…"); }}>
-                    Stop
+                <Button size="small" variant="dangerSecondary" disabled={!j.running} onClick={stop}>
+                    {j.stopping ? "Stop now" : "Stop"}
                 </Button>
                 <Button
                     size="small" variant="secondary" disabled={j.running}
-                    onClick={() => { settings.store.startId = ""; settings.store.endId = ""; settings.store.authorIds = ""; }}
+                    onClick={() => {
+                        settings.store.startId = "";
+                        settings.store.endId = "";
+                        settings.store.authorIds = "";
+                        settings.store.text = "";
+                    }}
                 >
-                    Clear range
+                    Clear range + filters
                 </Button>
             </div>
 
@@ -407,7 +401,7 @@ const messageMenuPatch: NavContextMenuPatchCallback = (children, props) => {
 const channelMenuPatch: NavContextMenuPatchCallback = (children, props) => {
     const channel = props?.channel;
     if (!channel?.id) return;
-    const set = (key: "channelId" | "targetChannelId" | "mirrorChannelId", what: string) => () => {
+    const set = (key: "channelId" | "targetChannelId", what: string) => () => {
         if (key === "channelId" && settings.store.channelId !== channel.id) {
             settings.store.startId = "";
             settings.store.endId = "";
@@ -419,7 +413,6 @@ const channelMenuPatch: NavContextMenuPatchCallback = (children, props) => {
         <Menu.MenuItem id="vc-msgops-ch" label="MessageOps">
             <Menu.MenuItem id="vc-msgops-ch-source" label="Set as source (whole channel)" action={set("channelId", "source")} />
             <Menu.MenuItem id="vc-msgops-ch-target" label="Set as target" action={set("targetChannelId", "target")} />
-            <Menu.MenuItem id="vc-msgops-ch-mirror" label="Set as mirror / log channel" action={set("mirrorChannelId", "mirror")} />
         </Menu.MenuItem>
     );
 };
@@ -428,7 +421,7 @@ const channelMenuPatch: NavContextMenuPatchCallback = (children, props) => {
 
 export default definePlugin({
     name: "MessageOps",
-    description: "Move, clone, back up and bulk-delete message ranges: mark first/last message by ID, filter by author/text/regex/files, forward/copy/webhook-clone to a channel, mirror every action into a log channel, ZIP backups, dry run.",
+    description: "Move, copy, export and bulk-delete message ranges: mark first/last message, filter by author/text/regex/files, forward / repost / webhook-clone into a channel, ZIP export. Paced by Discord's rate limit headers.",
     authors: [Author],
     tags: ["Utility", "Chat"],
     settings,
@@ -453,8 +446,13 @@ export default definePlugin({
             { name: "end", description: "Last message ID", type: ApplicationCommandOptionType.STRING, required: false },
             { name: "user", description: "Only this author", type: ApplicationCommandOptionType.USER, required: false },
             { name: "target", description: "Copy / Move target channel", type: ApplicationCommandOptionType.CHANNEL, required: false },
-            { name: "mirror", description: "Mirror / log channel (uses the mirror mode from settings, or forward)", type: ApplicationCommandOptionType.CHANNEL, required: false },
-            { name: "dry", description: "Dry run (default: plugin setting)", type: ApplicationCommandOptionType.BOOLEAN, required: false },
+            {
+                name: "style",
+                description: "Copy / Move: forward, repost or clone (default: plugin setting)",
+                type: ApplicationCommandOptionType.STRING,
+                required: false,
+                choices: (["forward", "repost", "clone"] as Style[]).map(v => ({ name: v, label: v, value: v }))
+            },
             { name: "max", description: "Stop after N matching messages", type: ApplicationCommandOptionType.INTEGER, required: false }
         ],
         execute: async (args, ctx) => {
@@ -463,8 +461,7 @@ export default definePlugin({
             const end = findOption<string>(args, "end", "");
             const user = findOption<string>(args, "user", "");
             const target = findOption<string>(args, "target", "");
-            const mirror = findOption<string>(args, "mirror", "");
-            const dry = findOption<boolean | undefined>(args, "dry", undefined);
+            const style = findOption<string>(args, "style", "");
             const max = findOption<number | undefined>(args, "max", undefined);
 
             const useHere = !!(start || end) || !settings.store.channelId;
@@ -475,14 +472,9 @@ export default definePlugin({
                     ...(max != null ? { maxCount: Math.max(0, max) } : {})
                 },
                 ...(target ? { targetChannelId: target } : {}),
-                ...(mirror ? {
-                    mirrorChannelId: mirror,
-                    mirrorMode: settings.store.mirrorMode === "off" ? "forward" : settings.store.mirrorMode as MirrorMode
-                } : {}),
-                ...(dry != null ? { dryRun: dry } : {})
+                ...(style ? { style: style as Style } : {})
             };
             const opts = optionsFor(action, over);
-            if (target && opts.transferMode === "webhook") opts.transferMode = "forward";
 
             sendBotMessage(ctx.channel.id, { content: `MessageOps: ${action} on <#${opts.selection.channelId}>…` });
             await run(opts, text => sendBotMessage(ctx.channel.id, { content: text }));
