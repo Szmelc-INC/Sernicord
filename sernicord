@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 PLUGINS_DIR="$ROOT/plugins"
 CLIENTS_DIR="$ROOT/clients"
 DEFAULT_PROFILE="sernicord"
