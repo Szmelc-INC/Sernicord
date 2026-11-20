@@ -21,7 +21,7 @@ import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { Alerts, ChannelStore, Menu, React, showToast, useEffect, useState } from "@webpack/common";
 
-import { isSnowflake, snowflakeTime } from "./api";
+import { AbortedError, isSnowflake, snowflakeTime } from "./api";
 import {
     Action, collect, execute, isDestructive, isTransfer, job, parseIds, Plan, Report, RunOptions, setStatus, Speed, Style
 } from "./ops";
@@ -252,8 +252,9 @@ async function run(opts: RunOptions, say?: (text: string) => void): Promise<void
         summary = summarize(opts, r);
         bad = r.failed > 0 || !!r.fatal || r.notDeleted > 0;
     } catch (e: any) {
-        summary = job.abort ? "MessageOps — stopped" : `MessageOps — error: ${e?.message ?? e}`;
-        bad = !job.abort;
+        const stopped = job.abort || e instanceof AbortedError;
+        summary = stopped ? "MessageOps — stopped" : `MessageOps — error: ${e?.message ?? e}`;
+        bad = !stopped;
     } finally {
         job.running = false;
         job.stopping = false;

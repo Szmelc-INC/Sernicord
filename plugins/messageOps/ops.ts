@@ -206,14 +206,16 @@ export async function collect(opts: RunOptions): Promise<Plan> {
     const messages: any[] = [];
     const scanLine = () => `Scanning… ${scanned} read, ${messages.length} matched`;
     const limiter = newLimiter(opts.speed, scanLine);
+    // nothing is written yet, so the first Stop click ends the scan
+    const scanJob = { get abort() { return job.abort || job.stopping; } };
 
     for (const id of [lo, hi]) {
-        if (id && !await messageInChannel(limiter, job, sel.channelId, id)) {
+        if (id && !await messageInChannel(limiter, scanJob, sel.channelId, id)) {
             throw new Error(`Message ${id} is not in channel ${sel.channelId} (threads have their own channel ID)`);
         }
     }
 
-    for await (const page of fetchRange(limiter, job, sel.channelId, lo, hi)) {
+    for await (const page of fetchRange(limiter, scanJob, sel.channelId, lo, hi)) {
         scanned += page.length;
         for (const m of page) {
             if (matches(m, sel, text)) messages.push(m);
@@ -222,7 +224,7 @@ export async function collect(opts: RunOptions): Promise<Plan> {
         setStatus(scanLine());
         if (sel.maxCount > 0 && messages.length >= sel.maxCount) break;
     }
-    if (job.abort) throw new AbortedError();
+    if (scanJob.abort) throw new AbortedError();
 
     let noPermission = 0;
     if (isDestructive(opts.action)) {
@@ -613,17 +615,22 @@ export async function buildZip(plan: Plan, label: string, strict: boolean, error
 
     const atts = messages.flatMap(m => (m.attachments ?? []).map((a: any) => ({ m, a })));
     let n = 0;
+    let failed = false;
+    // queued downloads give up once one strict download failed or Stop was clicked
+    const gate = { get abort() { return failed || job.abort || job.stopping; } };
     await Promise.all(atts.map(async ({ m, a }) => {
         try {
-            const f = await download(a.url, a.filename || "file", job);
+            const f = await download(a.url, a.filename || "file", gate);
             zip[`files/${m.id}-${safeName(a.filename || a.id)}`] = [new Uint8Array(await f.arrayBuffer()), { level: 0 }];
         } catch (e: any) {
+            if (failed) return;
             if (e instanceof AbortedError || strict) {
+                failed = true;
                 throw e instanceof AbortedError ? e : new Error(`backup of ${a.filename} failed (${e?.message ?? e}); nothing deleted`);
             }
             errors.push(`ZIP: ${a.filename}: ${e?.message ?? e} (URL kept in messages.json)`);
         }
-        setStatus(`ZIP: files ${++n}/${atts.length}`);
+        if (!failed) setStatus(`ZIP: files ${++n}/${atts.length}`);
     }));
 
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
