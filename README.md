@@ -170,7 +170,7 @@ Bundled plugins:
 | `megaDrop` | Large files via bashupload or chunk threads |
 | `bad2YouBad4Me` | Tolerator-T1000 — Laundry day: soften your own messages (keywords + optional LLM), live or bulk |
 | `fullCyberJacket` | Finds hate speech, threats, self-harm encouragement and extremist slogans (leet / look-alike / spacing aware) in a user's or server's messages for **manual** review and reporting; never reports by itself |
-| `szmelc` | Szmelc™ — OG szmelc mode for the whole client + the "szmelc" tab in Vencord settings with all our plugins and themes |
+| `szmelc` | Szmelc™ — OG szmelc mode for the whole client + Szmelc™ HQ (the "szmelc" settings tab): modules by category with search and quick toggles, profile switching, media tools, other installs, themes, look |
 | `discloudStorage` | Turns a server into your private cloud storage (you + your bots + backups) |
 | `allMyGifs` | Bulk favorite-gif manager: dump all to a channel (URLs or files) and suck a channel's gifs into favorites |
 | `messageOps` | Move / copy / export / bulk-delete message ranges: first + last message by ID (right-click), author / text-or-`/regex/` / file / bot / pin filters; Preview, Export ZIP (with files), Copy, Move, Delete into one target as native forward, repost or webhook clone (original name + avatar, webhook created for you); consecutive messages of one author merged into one post; paced by Discord's rate limit headers, posts and deletes in parallel; Move deletes a source only after its copy landed; safety ZIP before Move / Delete (`/msgops`) |
