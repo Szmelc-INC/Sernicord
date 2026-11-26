@@ -11,7 +11,7 @@ import { Button } from "@components/Button";
 import { openPluginModal } from "@components/settings/tabs/plugins/PluginModal";
 import { Switch } from "@components/Switch";
 import { Plugin } from "@utils/types";
-import { React, showToast, useEffect, useMemo, useState } from "@webpack/common";
+import { React, showToast, useEffect, useState } from "@webpack/common";
 import Plugins, { PluginMeta } from "~plugins";
 
 import { ScoutPanel } from "../instanceScout";
@@ -169,7 +169,7 @@ function ModulesPanel() {
     useSettings(["plugins"] as any);
     useEffect(() => { lastQuery = q; lastScope = scope; lastFilter = filter; }, [q, scope, filter]);
 
-    const list = useMemo(() => Object.values(Plugins)
+    const list = Object.values(Plugins)
         .filter(p => scope === "all" || isOurs(p.name))
         .filter(p => !p.hidden)
         .filter(p => filter === "all" || (filter === "on") === isPluginEnabled(p.name))
@@ -178,7 +178,7 @@ function ModulesPanel() {
             const needle = q.toLowerCase();
             return p.name.toLowerCase().includes(needle) || p.description.toLowerCase().includes(needle) || (p.tags ?? []).some(t => t.toLowerCase().includes(needle));
         })
-        .sort((a, b) => a.name.localeCompare(b.name)), [q, scope, filter, Settings.plugins]);
+        .sort((a, b) => a.name.localeCompare(b.name));
 
     const groups = scope === "ours"
         ? [...CATEGORIES, { id: "other", label: "Other", folders: [] }].map(c => ({ ...c, items: list.filter(p => categoryOf(p.name) === c.id) })).filter(g => g.items.length)
@@ -227,7 +227,7 @@ function ProfilesPanel({ go }: { go(t: TabId): void; }) {
         <div className="vc-hq">
             <div className="vc-hq-card">
                 <h4>Save the current setup</h4>
-                <div className="vc-hq-sub">Plugins, plugin settings, themes, theme links and QuickCSS. Switching saves the active profile first, so you can always go back.</div>
+                <div className="vc-hq-sub">Plugins, plugin settings, themes, theme links and QuickCSS. Switching keeps the previous state as “Autosave”, so you can always go back.</div>
                 <ProfileSaveBar />
             </div>
             <ProfileList />

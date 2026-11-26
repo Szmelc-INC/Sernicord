@@ -195,8 +195,9 @@ function VaultPanel() {
         <div style={{ display: "grid", gap: 12 }}>
             <Paragraph>
                 Snapshots include plugin enablement, plugin settings, themes, theme links, and QuickCSS.
-                Profiles stay in local DataStore (not cloud). Switching saves the current state into the
-                active profile first, so you can always switch back. Reload Discord after switching.
+                Profiles stay in local DataStore (not cloud). Switching saves the state before the switch as
+                "Autosave" (named profiles change only when you save them), keeps plugins a profile doesn't
+                mention as they are, and never turns ProfileVault / Szmelc off. Reload Discord after switching.
             </Paragraph>
             <ProfileSaveBar />
             <ProfileList />
