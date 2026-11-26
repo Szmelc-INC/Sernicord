@@ -107,6 +107,13 @@ Examples:
 ./sernicord scan --import themes --from ~/.config/Vencord
 ```
 
+Plugin tests (no Discord needed; MediaForge also runs real ffmpeg / sox encodes when they are on PATH):
+
+```sh
+node --experimental-strip-types --no-warnings scripts/test-messageops-limiter.ts
+node --experimental-strip-types --no-warnings scripts/test-mediaforge-planner.ts
+```
+
 `./dev.sh` remains a thin wrapper around `./sernicord`.
 
 ## Layout
@@ -167,6 +174,7 @@ Bundled plugins:
 | `discloudStorage` | Turns a server into your private cloud storage (you + your bots + backups) |
 | `allMyGifs` | Bulk favorite-gif manager: dump all to a channel (URLs or files) and suck a channel's gifs into favorites |
 | `messageOps` | Move / copy / export / bulk-delete message ranges: first + last message by ID (right-click), author / text-or-`/regex/` / file / bot / pin filters; Preview, Export ZIP (with files), Copy, Move, Delete into one target as native forward, repost or webhook clone (original name + avatar, webhook created for you); consecutive messages of one author merged into one post; paced by Discord's rate limit headers, posts and deletes in parallel; Move deletes a source only after its copy landed; safety ZIP before Move / Delete (`/msgops`) |
+| `mediaForge` | ffmpeg / sox / yt-dlp media centre: auto-fit uploads to the channel limit, clip / edit, split, join, emoji / sticker / soundboard / screenshot makers, link downloads, mpv / VLC control, Win95 Paint (`/forge`) |
 
 Upstream Vencord gitignores `src/userplugins`; Sernicord keeps the publishable copies here instead.
 
