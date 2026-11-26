@@ -10,7 +10,9 @@ import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, openModal, React, SelectedChannelStore, showToast, TextInput, useState } from "@webpack/common";
+import { Modal, openModal, React, SelectedChannelStore, showToast, TextArea, TextInput, useState } from "@webpack/common";
+
+import { Sx, Toggle } from "../szmelc/kit";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -118,7 +120,7 @@ export async function forgeSend(opts: {
             title: opts.title || undefined,
             description: opts.description || undefined,
             url: opts.url || undefined,
-            color: parseColor(opts.color || "#5865f2"),
+            color: parseColor(opts.color || "#1f8a8a"),
             footer: opts.footer ? { text: opts.footer } : undefined,
             fields: fields.length ? fields : undefined
         };
@@ -150,11 +152,20 @@ export async function forgeSend(opts: {
     showToast({ text: "EmbedForge: markdown card sent", variant: "default" });
 }
 
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode; }) {
+    return (
+        <label className="vc-sx-col tight">
+            <span className="vc-sx-section" style={{ margin: 0 }}>{label}{hint && <span className="vc-sx-muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}> · {hint}</span>}</span>
+            {children}
+        </label>
+    );
+}
+
 function BuilderModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [title, setTitle] = useState("Hello from EmbedForge");
     const [description, setDescription] = useState("Configurable weird useful object.");
     const [url, setUrl] = useState("");
-    const [color, setColor] = useState("#5865f2");
+    const [color, setColor] = useState("#1f8a8a");
     const [footer, setFooter] = useState("Sernicord");
     const [fields, setFields] = useState("mode=webhook|markdown\nstatus=online");
     const [buttonLabel, setButtonLabel] = useState("Open");
@@ -163,24 +174,30 @@ function BuilderModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [asMarkdown, setAsMarkdown] = useState(false);
 
     return (
-        <Modal {...modalProps} size="md" title="EmbedForge builder">
-            <div>
-                <Paragraph>Title</Paragraph>
-                <TextInput value={title} onChange={setTitle} />
-                <Paragraph>Description</Paragraph>
-                <TextInput value={description} onChange={setDescription} />
-                <Paragraph>URL / Color / Footer</Paragraph>
-                <TextInput value={url} onChange={setUrl} placeholder="https://..." />
-                <TextInput value={color} onChange={setColor} placeholder="#5865f2" />
-                <TextInput value={footer} onChange={setFooter} />
-                <Paragraph>Fields (name=value per line)</Paragraph>
-                <TextInput value={fields} onChange={setFields} />
-                <Paragraph>Link button (webhook only)</Paragraph>
-                <TextInput value={buttonLabel} onChange={setButtonLabel} placeholder="Label" />
-                <TextInput value={buttonUrl} onChange={setButtonUrl} placeholder="https://..." />
-                <Paragraph>Webhook override</Paragraph>
-                <TextInput value={webhook} onChange={setWebhook} />
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <Modal {...modalProps} size="md" title="EmbedForge builder" subtitle="Webhook embed with a link button, or a markdown card">
+            <Sx pad>
+                <Field label="Title"><TextInput value={title} onChange={setTitle} /></Field>
+                <Field label="Description"><TextArea value={description} onChange={setDescription} rows={3} /></Field>
+                <div className="vc-sx-grid" style={{ "--sx-min": "160px" } as React.CSSProperties}>
+                    <Field label="URL"><TextInput value={url} onChange={setUrl} placeholder="https://..." /></Field>
+                    <Field label="Color">
+                        <div className="vc-sx-row nowrap">
+                            <span aria-hidden style={{ width: 20, height: 20, borderRadius: 4, flex: "none", background: /^#?[0-9a-f]{6}$/i.test(color.trim()) ? `#${color.trim().replace("#", "")}` : "transparent", border: "1px solid var(--sx-line)" }} />
+                            <div className="vc-sx-grow"><TextInput value={color} onChange={setColor} placeholder="#1f8a8a" /></div>
+                        </div>
+                    </Field>
+                    <Field label="Footer"><TextInput value={footer} onChange={setFooter} /></Field>
+                </div>
+                <Field label="Fields" hint="one name=value per line"><TextArea value={fields} onChange={setFields} rows={3} /></Field>
+                <div className="vc-sx-grid" style={{ "--sx-min": "180px" } as React.CSSProperties}>
+                    <Field label="Button label" hint="webhook only"><TextInput value={buttonLabel} onChange={setButtonLabel} placeholder="Label" /></Field>
+                    <Field label="Button URL"><TextInput value={buttonUrl} onChange={setButtonUrl} placeholder="https://..." /></Field>
+                </div>
+                <Field label="Webhook override" hint="empty = default from settings"><TextInput value={webhook} onChange={setWebhook} /></Field>
+                <hr className="vc-sx-divider" />
+                <div className="vc-sx-row">
+                    <Toggle checked={asMarkdown} onChange={setAsMarkdown}>Send as markdown card (no webhook)</Toggle>
+                    <span className="vc-sx-spacer" />
                     <Button onClick={async () => {
                         try {
                             await forgeSend({
@@ -193,11 +210,8 @@ function BuilderModal({ modalProps }: { modalProps: RenderModalProps; }) {
                             showToast({ text: String(e), variant: "critical" });
                         }
                     }}>Send</Button>
-                    <Button variant="secondary" onClick={() => setAsMarkdown(v => !v)}>
-                        Mode: {asMarkdown ? "markdown card" : "webhook if set"}
-                    </Button>
                 </div>
-            </div>
+            </Sx>
         </Modal>
     );
 }

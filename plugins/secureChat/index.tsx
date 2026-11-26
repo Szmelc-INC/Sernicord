@@ -11,6 +11,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
 import { ChannelStore, showToast, useEffect, useState } from "@webpack/common";
 
+import { Sx } from "../szmelc/kit";
 import { decryptText, encryptText, isSecurePayload } from "./crypto";
 
 const Author = { name: "sernik", id: 0n };
@@ -122,26 +123,14 @@ function DecryptedAccessory({ message }: { message: Message; }) {
     if (!isSecurePayload(message.content)) return null;
 
     return (
-        <div style={{
-            marginTop: 4,
-            padding: "6px 8px",
-            borderRadius: 8,
-            background: "var(--background-secondary)",
-            borderLeft: "3px solid var(--status-positive, #23a55a)"
-        }}>
-            <Paragraph style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>
-                SecureChat decrypted
-            </Paragraph>
-            {text != null && (
-                <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>{text}</Paragraph>
-            )}
-            {err && (
-                <Paragraph style={{ color: "var(--status-danger)" }}>
-                    decrypt failed: {err}
-                </Paragraph>
-            )}
-            {!text && !err && <Paragraph>decrypting…</Paragraph>}
-        </div>
+        <Sx style={{ marginTop: 4, gap: 2 }}>
+            <div className="vc-sx-card compact" style={{ borderLeft: `3px solid ${err ? "var(--sx-danger-text)" : "var(--sx-accent-text)"}` }}>
+                <div className="vc-sx-muted">🔒 SecureChat {err ? "· could not decrypt" : "· decrypted"}</div>
+                {text != null && <div className="vc-sx-pre">{text}</div>}
+                {err && <div className="vc-sx-err">{err}</div>}
+                {!text && !err && <div className="vc-sx-muted">decrypting…</div>}
+            </div>
+        </Sx>
     );
 }
 

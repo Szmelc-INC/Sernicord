@@ -16,11 +16,11 @@ import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, 
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { Alerts, ChannelStore, Menu, React, showToast, useEffect, useState } from "@webpack/common";
 
+import { cx, Pill, Sx } from "../szmelc/kit";
 import { AbortedError, isSnowflake, snowflakeTime } from "./api";
 import {
     Action, collect, execute, isDestructive, isTransfer, job, parseIds, Plan, Report, RunOptions, setStatus, Speed, Style
@@ -303,19 +303,37 @@ function Panel() {
     const s = settings.use(["channelId", "startId", "endId", "authorIds", "text", "targetChannelId", "style"]);
     const j = useJobStatus();
     const authors = parseIds(s.authorIds);
-    const line = (text: string) => <Paragraph style={{ fontSize: 13, margin: "4px 0" }}>{text}</Paragraph>;
+    const kv = (k: string, v: React.ReactNode) => (
+        <>
+            <span className="vc-sx-muted" style={{ fontSize: 13 }}>{k}</span>
+            <span style={{ fontSize: 13, minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
+        </>
+    );
+    const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", alignItems: "baseline" };
 
     return (
-        <div style={{ padding: 12, borderRadius: 8, background: "var(--background-secondary)", marginBottom: 16 }}>
-            <Heading tag="h5">Source</Heading>
-            {line(`Channel: ${s.channelId ? channelLabel(s.channelId) : "— (right-click a message or channel → MessageOps)"}`)}
-            {line(`From: ${idLabel(s.startId)}`)}
-            {line(`To: ${idLabel(s.endId)}`)}
-            {line(`Authors: ${authors.length ? authors.join(", ") : "everyone"}${s.text ? ` · text: ${s.text}` : ""}`)}
-            <Heading tag="h5" style={{ marginTop: 8 }}>Target (Copy / Move)</Heading>
-            {line(`${channelLabel(s.targetChannelId)} as ${STYLE_LABEL[s.style as Style] ?? s.style}`)}
+        <Sx style={{ marginBottom: 16 }}>
+            <div className="vc-sx-grid" style={{ "--sx-min": "260px" } as React.CSSProperties}>
+                <section className="vc-sx-card">
+                    <h4>Source</h4>
+                    <div style={grid}>
+                        {kv("Channel", s.channelId ? channelLabel(s.channelId) : <span className="vc-sx-muted">right-click a message or channel → MessageOps</span>)}
+                        {kv("From", idLabel(s.startId))}
+                        {kv("To", idLabel(s.endId))}
+                        {kv("Authors", authors.length ? authors.join(", ") : "everyone")}
+                        {s.text && kv("Text", s.text)}
+                    </div>
+                </section>
+                <section className="vc-sx-card">
+                    <h4>Target <Pill tone="outline">Copy / Move</Pill></h4>
+                    <div style={grid}>
+                        {kv("Channel", channelLabel(s.targetChannelId))}
+                        {kv("Style", STYLE_LABEL[s.style as Style] ?? s.style)}
+                    </div>
+                </section>
+            </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+            <div className="vc-sx-row">
                 {ACTIONS.map(a => (
                     <Button
                         key={a.id}
@@ -327,6 +345,7 @@ function Panel() {
                         {a.label}
                     </Button>
                 ))}
+                <span className="vc-sx-spacer" />
                 <Button size="small" variant="dangerSecondary" disabled={!j.running} onClick={stop}>
                     {j.stopping ? "Stop now" : "Stop"}
                 </Button>
@@ -343,10 +362,13 @@ function Panel() {
                 </Button>
             </div>
 
-            <Paragraph style={{ fontSize: 12, fontFamily: "var(--font-code)", opacity: 0.85, margin: 0 }}>
-                {j.status}
-            </Paragraph>
-        </div>
+            <div className={cx("vc-sx-card compact", j.running && "active")}>
+                <div className="vc-sx-row nowrap">
+                    {j.running && <Pill tone="aqua">running</Pill>}
+                    <span className="vc-sx-mono vc-sx-grow">{j.status}</span>
+                </div>
+            </div>
+        </Sx>
     );
 }
 

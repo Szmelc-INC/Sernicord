@@ -7,7 +7,6 @@ import { ApplicationCommandInputType, ApplicationCommandOptionType, sendBotMessa
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { saveFile } from "@utils/web";
@@ -25,6 +24,7 @@ import {
 } from "@webpack/common";
 import { strToU8, zipSync } from "fflate";
 
+import { Pill, Sx } from "../szmelc/kit";
 import { LlmConfig, rewrite, Verdict } from "./llm";
 
 const UNDO_KEY = "Bad2YouBad4Me_undo";
@@ -612,22 +612,25 @@ function LaundryPanel() {
     );
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Heading tag="h4">Laundry day</Heading>
-            <Paragraph>
-                Washes only your own messages. Start with dry run on, read the counts, then turn it off.
-                Every real edit is logged locally so it can be undone.
-            </Paragraph>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {btn("This channel", "channel")}
-                {btn("This server", "guild")}
-                {btn("All DMs", "dms")}
-                {btn("Everywhere", "everywhere")}
-                <Button size="small" variant="dangerPrimary" disabled={!job.running} onClick={() => { job.abort = true; }}>Stop</Button>
-                <Button size="small" variant="secondary" disabled={job.running} onClick={undoAll}>Undo all logged edits</Button>
-            </div>
-            <Paragraph>{job.status}</Paragraph>
-        </div>
+        <Sx>
+            <section className="vc-sx-card">
+                <h4>Laundry day {job.running && <Pill tone="aqua">running</Pill>}</h4>
+                <p className="vc-sx-hint">
+                    Washes only your own messages. Start with dry run on, read the counts, then turn it off.
+                    Every real edit is logged locally so it can be undone.
+                </p>
+                <div className="vc-sx-row">
+                    {btn("This channel", "channel")}
+                    {btn("This server", "guild")}
+                    {btn("All DMs", "dms")}
+                    {btn("Everywhere", "everywhere")}
+                    <span className="vc-sx-spacer" />
+                    <Button size="small" variant="dangerPrimary" disabled={!job.running} onClick={() => { job.abort = true; }}>Stop</Button>
+                    <Button size="small" variant="secondary" disabled={job.running} onClick={undoAll}>Undo all logged edits</Button>
+                </div>
+                {job.status && <div className="vc-sx-mono vc-sx-muted">{job.status}</div>}
+            </section>
+        </Sx>
     );
 }
 

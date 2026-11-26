@@ -11,6 +11,8 @@ import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, React, showToast, useEffect, UserStore, useState } from "@webpack/common";
 
+import { Empty, Pill, Sx } from "../szmelc/kit";
+
 const Author = { name: "sernik", id: 0n };
 const LOG_KEY = "SernicordSecretSentinelLog";
 
@@ -146,8 +148,8 @@ function AlertViewer() {
     useEffect(() => { refresh(); }, []);
 
     return (
-        <div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <Sx>
+            <div className="vc-sx-row">
                 <Button size="small" onClick={refresh}>Refresh</Button>
                 <Button variant="dangerSecondary"
                     size="small"
@@ -176,19 +178,24 @@ function AlertViewer() {
                     Export JSON
                 </Button>
             </div>
-            {!log.length && <Paragraph>No alerts yet.</Paragraph>}
-            {log.slice(0, 50).map(a => (
-                <div key={a.id} style={{ padding: 8, marginBottom: 6, background: "var(--background-secondary)", borderRadius: 8 }}>
-                    <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
-                        {new Date(a.ts).toLocaleString()} · {a.patternName} · {a.authorTag} · #{a.channelId}
-                    </Paragraph>
-                    <Paragraph><b>{a.reason}</b> → <code>{a.matched}</code></Paragraph>
-                    <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text", fontSize: 12 }}>
-                        {a.content.slice(0, 800)}
-                    </Paragraph>
-                </div>
-            ))}
-        </div>
+            {!log.length && <Empty>No alerts yet.</Empty>}
+            {log.length > 0 && <div className="vc-sx-muted">Showing {Math.min(50, log.length)} of {log.length} alert(s), newest first.</div>}
+            <div className="vc-sx-col tight">
+                {log.slice(0, 50).map(a => (
+                    <div key={a.id} className="vc-sx-card compact danger">
+                        <div className="vc-sx-row between">
+                            <div className="vc-sx-pills">
+                                <Pill tone="danger">{a.patternName}</Pill>
+                                <b>{a.reason}</b>
+                            </div>
+                            <span className="vc-sx-muted">{new Date(a.ts).toLocaleString()}</span>
+                        </div>
+                        <div className="vc-sx-muted">{a.authorTag} · <span className="vc-sx-mono">#{a.channelId}</span> · matched <code>{a.matched}</code></div>
+                        <pre className="vc-sx-code" style={{ maxHeight: 160 }}>{a.content.slice(0, 800)}</pre>
+                    </div>
+                ))}
+            </div>
+        </Sx>
     );
 }
 
