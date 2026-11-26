@@ -614,7 +614,7 @@ STALE_API_PATTERNS=(
   'Button\.(Looks|Colors|Sizes)::use <Button variant= size=> from @components/Button'
   'Modal\.Modal(Root|Header|Content|Footer|CloseButton|Size)::use <Modal title=> from @webpack/common'
   'variant: "(info|warning)"::toast variants are default | success | critical'
-  'managedStyle: *([`"'"'"']|[A-Z][A-Z0-9_]+ *([+,]|$))::managedStyle takes a style name from import s from "./x.css?managed", not raw CSS (enableStyle throws and the plugin loads unstyled)'
+  'managedStyle: *([`"'"'"']|[A-Z0-9_]*_CSS\b)::managedStyle takes a style name from import s from "./x.css?managed", not raw CSS (enableStyle throws, the plugin loads unstyled and every plugin after it never starts)'
 )
 
 # Static scan + TypeScript check of plugins/ against the target's current API
