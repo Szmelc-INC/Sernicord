@@ -8,15 +8,14 @@
 
 import { definePluginSettings, Settings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
-import { Switch } from "@components/Switch";
 import { promptToRestart } from "@utils/promptToRestart";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Alerts, Modal, openModal, React, showToast, useEffect, useMemo, useState } from "@webpack/common";
 import Plugins from "~plugins";
 
 import { uniqueProfileName, upsertProfile } from "../profileVault/store";
+import { Check, Code, cx, Empty, Pill, Sx, Tabs, Toggle } from "../szmelc/kit";
 import type { Instance, InstanceDetails } from "./native";
 
 const Author = { name: "sernik", id: 0n };
@@ -36,46 +35,7 @@ const KIND_LABEL: Record<Instance["kind"], string> = {
 const err = (e: unknown) => String((e as Error)?.message ?? e);
 const toastErr = (e: unknown) => showToast({ text: err(e), variant: "critical" });
 
-/* ---------- small UI bits (Szmelc palette, no purple) ---------- */
-
-function Pill({ children, tone = "grey" }: { children: React.ReactNode; tone?: "grey" | "accent" | "danger" | "aqua"; }) {
-    const bg = { grey: "#262626", accent: "#105c5c", danger: "#750f0f", aqua: "#7fffd4" }[tone];
-    const fg = tone === "aqua" ? "#000" : tone === "grey" ? "#c0c0c0" : "#fff";
-    return (
-        <span style={{
-            display: "inline-block", padding: "1px 7px", borderRadius: 4, fontSize: 11, fontWeight: 600,
-            background: bg, color: fg, marginRight: 4, marginBottom: 2, whiteSpace: "nowrap"
-        }}>{children}</span>
-    );
-}
-
-const card: React.CSSProperties = {
-    padding: 12, borderRadius: 8, background: "var(--background-secondary)",
-    border: "1px solid var(--background-modifier-accent)"
-};
-const row: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" };
-const mono: React.CSSProperties = { fontFamily: "var(--font-code)", fontSize: 12 };
-
-function Code({ text, max = 320 }: { text: string; max?: number; }) {
-    return (
-        <pre style={{
-            ...mono, maxHeight: max, overflow: "auto", margin: 0, padding: 10, borderRadius: 6,
-            background: "#0b0b0b", color: "#dcdddd", border: "1px solid #262626", whiteSpace: "pre-wrap", wordBreak: "break-word"
-        }}>{text || "(empty)"}</pre>
-    );
-}
-
-function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange(v: T): void; tabs: Array<[NoInfer<T>, string, number?]>; }) {
-    return (
-        <div style={{ ...row, gap: 4, marginBottom: 10, borderBottom: "1px solid #262626", paddingBottom: 6 }}>
-            {tabs.map(([id, label, count]) => (
-                <Button key={id} size="small" variant={value === id ? "primary" : "secondary"} onClick={() => onChange(id)}>
-                    {label}{count != null ? ` (${count})` : ""}
-                </Button>
-            ))}
-        </div>
-    );
-}
+const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
 /* ---------- import actions ---------- */
 
@@ -137,7 +97,7 @@ async function makeProfile(inst: Instance, mod: ModDetails, extraCss = "") {
     return name;
 }
 
-function confirm(title: string, body: React.ReactNode, onConfirm: () => void, _danger = false) {
+function confirm(title: string, body: React.ReactNode, onConfirm: () => void) {
     Alerts.show({
         title,
         body,
@@ -148,6 +108,12 @@ function confirm(title: string, body: React.ReactNode, onConfirm: () => void, _d
 }
 
 /* ---------- browse modal ---------- */
+
+function toggleIn(set: Set<string>, key: string, on: boolean) {
+    const n = new Set(set);
+    on ? n.add(key) : n.delete(key);
+    return n;
+}
 
 function ThemeList({ inst, where, themes, enableAfter }: {
     inst: Instance; where: string; themes: InstanceDetails["mods"][number]["themes"]; enableAfter: boolean;
@@ -170,51 +136,46 @@ function ThemeList({ inst, where, themes, enableAfter }: {
         } catch (e) { toastErr(e); }
     };
 
-    if (!themes.length) return <Paragraph style={{ opacity: 0.7 }}>No themes here.</Paragraph>;
+    if (!themes.length) return <Empty>No themes here.</Empty>;
     return (
-        <div style={{ display: "grid", gap: 6 }}>
-            <div style={row}>
+        <div className="vc-sx-col">
+            <div className="vc-sx-row">
                 <Button size="small" disabled={!sel.size} onClick={() => doImport([...sel])}>Import selected ({sel.size})</Button>
                 <Button size="small" variant="secondary" onClick={() => doImport(themes.map(t => t.fileName))}>Import all</Button>
-                <span style={{ ...row, marginLeft: 8 }}>
-                    <Switch checked={overwrite} onChange={setOverwrite} /> <span style={{ fontSize: 12 }}>overwrite existing</span>
-                </span>
+                <span className="vc-sx-spacer" />
+                <Toggle checked={overwrite} onChange={setOverwrite}>Overwrite existing</Toggle>
             </div>
-            {themes.map(t => (
-                <div key={t.fileName} style={{ ...card, padding: 8 }}>
-                    <div style={{ ...row, justifyContent: "space-between" }}>
-                        <label style={{ ...row, cursor: "pointer", minWidth: 0 }}>
-                            <input
-                                type="checkbox"
-                                checked={sel.has(t.fileName)}
-                                onChange={e => {
-                                    const n = new Set(sel);
-                                    e.currentTarget.checked ? n.add(t.fileName) : n.delete(t.fileName);
-                                    setSel(n);
-                                }}
-                            />
-                            <span>
-                                <b>{t.name ?? t.fileName}</b>
-                                <span style={{ opacity: 0.6, fontSize: 12 }}> {t.author ? `by ${t.author} · ` : ""}{(t.size / 1024).toFixed(1)} KB</span>
-                                {t.description && <div style={{ fontSize: 12, opacity: 0.7 }}>{t.description}</div>}
-                            </span>
-                        </label>
-                        <div style={row}>
-                            <Button size="small" variant="secondary" onClick={async () => {
-                                if (preview?.name === t.fileName) return setPreview(null);
-                                try { setPreview({ name: t.fileName, src: await api.readSource(inst.root, where, t.fileName) }); } catch (e) { toastErr(e); }
-                            }}>{preview?.name === t.fileName ? "Hide" : "View"}</Button>
-                            <Button size="small" onClick={() => doImport([t.fileName])}>Import</Button>
+            <div className="vc-sx-col tight">
+                {themes.map(t => {
+                    const open = preview?.name === t.fileName;
+                    return (
+                        <div key={t.fileName} className={cx("vc-sx-card compact", sel.has(t.fileName) && "active")}>
+                            <div className="vc-sx-row between nowrap">
+                                <Check checked={sel.has(t.fileName)} onChange={v => setSel(toggleIn(sel, t.fileName, v))}>
+                                    <div className="vc-sx-ellipsis"><b>{t.name ?? t.fileName}</b></div>
+                                    <div className="vc-sx-muted">
+                                        {t.author ? `by ${t.author} · ` : ""}{(t.size / 1024).toFixed(1)} KB
+                                        {t.description ? ` · ${t.description}` : ""}
+                                    </div>
+                                </Check>
+                                <div className="vc-sx-row nowrap">
+                                    <Button size="small" variant="secondary" onClick={async () => {
+                                        if (open) return setPreview(null);
+                                        try { setPreview({ name: t.fileName, src: await api.readSource(inst.root, where, t.fileName) }); } catch (e) { toastErr(e); }
+                                    }}>{open ? "Hide" : "View"}</Button>
+                                    <Button size="small" onClick={() => doImport([t.fileName])}>Import</Button>
+                                </div>
+                            </div>
+                            {open && <Code text={preview.src} />}
                         </div>
-                    </div>
-                    {preview?.name === t.fileName && <div style={{ marginTop: 8 }}><Code text={preview.src} /></div>}
-                </div>
-            ))}
+                    );
+                })}
+            </div>
         </div>
     );
 }
 
-function PluginSetView({ inst, mod }: { inst: Instance; mod: ModDetails; }) {
+function PluginSetView({ mod }: { mod: ModDetails; }) {
     const enabled = useMemo(() => enabledIn(mod.settings), [mod]);
     const [sel, setSel] = useState<Set<string>>(() => new Set(enabled.filter(knownHere)));
     const [withSettings, setWithSettings] = useState(true);
@@ -231,53 +192,46 @@ function PluginSetView({ inst, mod }: { inst: Instance; mod: ModDetails; }) {
                     : `Enable ${sel.size} plugins here (nothing gets disabled).`}
                 {withSettings ? " Their settings from the source are copied too." : ""}
             </Paragraph>
-            <Paragraph style={{ opacity: 0.7, marginTop: 8 }}>Tip: save a profile first (szmelc tab → Profiles) so you can switch back.</Paragraph>
+            <Paragraph className="vc-sx-hint" style={{ marginTop: 8 }}>Tip: save a profile first (szmelc tab → Profiles) so you can switch back.</Paragraph>
         </>,
         () => {
             const n = applyPluginSet(mod.settings, [...sel], withSettings, exact);
             showToast({ text: `${n} plugin(s) changed`, variant: "success" });
             promptToRestart("reload");
-        },
-        exact
+        }
     );
 
     if (!mod.settings) {
-        return <Paragraph style={{ opacity: 0.7 }}>{mod.settingsError ? `settings.json unreadable: ${mod.settingsError}` : "No settings.json here."}</Paragraph>;
+        return <Empty>{mod.settingsError ? `settings.json unreadable: ${mod.settingsError}` : "No settings.json here."}</Empty>;
     }
     return (
-        <div style={{ display: "grid", gap: 8 }}>
-            <div style={row}>
+        <div className="vc-sx-col">
+            <div className="vc-sx-pills">
                 <Pill tone="accent">{enabled.length} enabled there</Pill>
                 <Pill>{enabled.length - missing} available here</Pill>
                 {missing > 0 && <Pill tone="danger">{missing} not installed here</Pill>}
             </div>
-            <div style={row}>
+            <div className="vc-sx-row">
                 <Button size="small" disabled={!sel.size} onClick={() => apply(false)}>Enable selected ({sel.size})</Button>
                 <Button size="small" variant="dangerSecondary" disabled={!sel.size} onClick={() => apply(true)}>Mirror exactly</Button>
-                <span style={{ ...row, marginLeft: 8 }}><Switch checked={withSettings} onChange={setWithSettings} /> <span style={{ fontSize: 12 }}>copy plugin settings</span></span>
-                <span style={{ flex: 1 }} />
-                <Tabs<"all" | "here" | "missing"> value={filter} onChange={setFilter} tabs={[["all", "All"], ["here", "Here"], ["missing", "Missing"]]} />
+                <Toggle checked={withSettings} onChange={setWithSettings}>Copy plugin settings</Toggle>
+                <span className="vc-sx-spacer" />
+                <Tabs<"all" | "here" | "missing"> inline label="Filter" value={filter} onChange={setFilter} tabs={[["all", "All"], ["here", "Here"], ["missing", "Missing"]]} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 4, maxHeight: 340, overflow: "auto" }}>
-                {shown.map(n => {
-                    const ok = knownHere(n);
-                    return (
-                        <label key={n} style={{ ...row, fontSize: 13, opacity: ok ? 1 : 0.5, cursor: ok ? "pointer" : "default" }} title={ok ? "" : "not installed in this client"}>
-                            <input
-                                type="checkbox"
-                                disabled={!ok}
-                                checked={sel.has(n)}
-                                onChange={e => {
-                                    const s = new Set(sel);
-                                    e.currentTarget.checked ? s.add(n) : s.delete(n);
-                                    setSel(s);
-                                }}
-                            />
-                            {n}
-                        </label>
-                    );
-                })}
-            </div>
+            {shown.length
+                ? (
+                    <div className="vc-sx-grid vc-sx-scroll" style={{ gap: 2 }}>
+                        {shown.map(n => {
+                            const ok = knownHere(n);
+                            return (
+                                <Check key={n} disabled={!ok} checked={sel.has(n)} title={ok ? undefined : "not installed in this client"} onChange={v => setSel(toggleIn(sel, n, v))}>
+                                    <span className="vc-sx-ellipsis">{n}</span>
+                                </Check>
+                            );
+                        })}
+                    </div>
+                )
+                : <Empty>Nothing in this filter.</Empty>}
         </div>
     );
 }
@@ -286,67 +240,68 @@ function ModView({ inst, mod }: { inst: Instance; mod: ModDetails; }) {
     const [tab, setTab] = useState<"overview" | "plugins" | "themes" | "css" | "raw">("overview");
     const links: string[] = Array.isArray(mod.settings?.themeLinks) ? mod.settings.themeLinks : [];
     const [enableAfter, setEnableAfter] = useState(true);
+    const pluginCount = enabledIn(mod.settings).length;
 
     return (
-        <div style={{ ...card, marginBottom: 10 }}>
-            <Heading tag="h5" style={{ margin: "0 0 2px" }}>{mod.label}</Heading>
-            <Paragraph style={{ ...mono, opacity: 0.6, marginBottom: 8 }}>{mod.dir}</Paragraph>
-            <Tabs<"overview" | "plugins" | "themes" | "css" | "raw"> value={tab} onChange={setTab} tabs={[
+        <section className="vc-sx-card">
+            <div className="vc-sx-col tight">
+                <h4>{mod.label}</h4>
+                <div className="vc-sx-mono vc-sx-muted">{mod.dir}</div>
+            </div>
+            <Tabs<"overview" | "plugins" | "themes" | "css" | "raw"> label={`${mod.label} sections`} value={tab} onChange={setTab} tabs={[
                 ["overview", "Overview"],
-                ["plugins", "Plugins", enabledIn(mod.settings).length],
+                ["plugins", "Plugins", pluginCount],
                 ["themes", "Themes", mod.themes.length],
                 ["css", "QuickCSS"],
                 ["raw", "settings.json"]
             ]} />
             {tab === "overview" && (
-                <div style={{ display: "grid", gap: 8 }}>
-                    <div style={row}>
-                        <Pill tone="accent">{enabledIn(mod.settings).length} plugins on</Pill>
+                <div className="vc-sx-col">
+                    <div className="vc-sx-pills">
+                        <Pill tone="accent">{pluginCount} plugins on</Pill>
                         <Pill>{mod.themes.length} themes</Pill>
                         <Pill>{(mod.settings?.enabledThemes ?? []).length} themes on</Pill>
                         <Pill>{links.length} theme links</Pill>
                         <Pill>{mod.quickCss ? `QuickCSS ${(mod.quickCss.length / 1024).toFixed(1)} KB` : "no QuickCSS"}</Pill>
                     </div>
-                    <div style={row}>
+                    <div className="vc-sx-row">
                         <Button size="small" variant="positive" disabled={!mod.settings} onClick={async () => {
                             try {
                                 showToast({ text: `Profile "${await makeProfile(inst, mod)}" created — switch to it in the szmelc tab`, variant: "success" });
                             } catch (e) { toastErr(e); }
                         }}>New profile from this</Button>
-                        <Button size="small" disabled={!links.length} onClick={() => {
+                        <Button size="small" variant="secondary" disabled={!links.length} onClick={() => {
                             const n = importThemeLinks(mod.settings);
                             showToast({ text: n ? `Added ${n} theme link(s)` : "All theme links already present", variant: n ? "success" : "default" });
                         }}>Import theme links</Button>
-                        <Button size="small" disabled={!mod.quickCss} onClick={() => importQuickCss(mod.quickCss, "append", mod.dir)
+                        <Button size="small" variant="secondary" disabled={!mod.quickCss} onClick={() => importQuickCss(mod.quickCss, "append", mod.dir)
                             .then(() => showToast({ text: "QuickCSS appended", variant: "success" })).catch(toastErr)}>Append QuickCSS</Button>
-                        <Button size="small" variant="secondary" onClick={() => setTab("plugins")}>Pick plugins…</Button>
-                        <Button size="small" variant="secondary" onClick={() => setTab("themes")}>Pick themes…</Button>
                     </div>
+                    <p className="vc-sx-hint">Pick single plugins or themes in their tabs above.</p>
                 </div>
             )}
-            {tab === "plugins" && <PluginSetView inst={inst} mod={mod} />}
+            {tab === "plugins" && <PluginSetView mod={mod} />}
             {tab === "themes" && (
-                <>
-                    <div style={{ ...row, marginBottom: 6 }}><Switch checked={enableAfter} onChange={setEnableAfter} /> <span style={{ fontSize: 12 }}>enable themes after import</span></div>
+                <div className="vc-sx-col">
+                    <Toggle checked={enableAfter} onChange={setEnableAfter}>Enable themes after import</Toggle>
                     <ThemeList inst={inst} where={mod.dir} themes={mod.themes} enableAfter={enableAfter} />
-                </>
+                </div>
             )}
             {tab === "css" && (
-                <div style={{ display: "grid", gap: 6 }}>
-                    <div style={row}>
+                <div className="vc-sx-col">
+                    <div className="vc-sx-row">
                         <Button size="small" disabled={!mod.quickCss} onClick={() => importQuickCss(mod.quickCss, "append", mod.dir)
                             .then(() => showToast({ text: "QuickCSS appended", variant: "success" })).catch(toastErr)}>Append to mine</Button>
                         <Button size="small" variant="dangerSecondary" disabled={!mod.quickCss} onClick={() => confirm(
                             "Replace your QuickCSS?", <Paragraph>Your current QuickCSS is overwritten.</Paragraph>,
-                            () => importQuickCss(mod.quickCss, "replace", mod.dir).then(() => showToast({ text: "QuickCSS replaced", variant: "success" })).catch(toastErr),
-                            true
+                            () => importQuickCss(mod.quickCss, "replace", mod.dir).then(() => showToast({ text: "QuickCSS replaced", variant: "success" })).catch(toastErr)
                         )}>Replace mine</Button>
                     </div>
                     <Code text={mod.quickCss} />
                 </div>
             )}
             {tab === "raw" && <Code text={mod.settings ? JSON.stringify(mod.settings, null, 2) : mod.settingsError ?? "(none)"} max={400} />}
-        </div>
+        </section>
     );
 }
 
@@ -355,44 +310,54 @@ function BdView({ inst, bd }: { inst: Instance; bd: NonNullable<InstanceDetails[
     const [src, setSrc] = useState<{ name: string; text: string; } | null>(null);
     const api = native()!;
     return (
-        <div style={{ ...card, marginBottom: 10 }}>
-            <Heading tag="h5" style={{ margin: "0 0 8px" }}>BetterDiscord</Heading>
-            <Tabs<"themes" | "plugins" | "css"> value={tab} onChange={setTab} tabs={[["themes", "Themes", bd.themes.length], ["plugins", "Plugins", bd.plugins.length], ["css", "custom.css"]]} />
+        <section className="vc-sx-card">
+            <h4>BetterDiscord <Pill tone="danger">BdApi</Pill></h4>
+            <Tabs<"themes" | "plugins" | "css"> label="BetterDiscord sections" value={tab} onChange={setTab} tabs={[["themes", "Themes", bd.themes.length], ["plugins", "Plugins", bd.plugins.length], ["css", "custom.css"]]} />
             {tab === "themes" && <ThemeList inst={inst} where="bd-themes" themes={bd.themes} enableAfter />}
             {tab === "plugins" && (
-                <div style={{ display: "grid", gap: 6 }}>
-                    <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
+                <div className="vc-sx-col">
+                    <p className="vc-sx-hint">
                         BetterDiscord <code>.plugin.js</code> files use the BdApi and cannot run on Vencord. Browse them here;
                         many have a Vencord / Equicord counterpart with the same name.
-                    </Paragraph>
-                    {bd.plugins.map(p => (
-                        <div key={p.fileName} style={{ ...card, padding: 8 }}>
-                            <div style={{ ...row, justifyContent: "space-between" }}>
-                                <span>
-                                    <b>{p.name ?? p.fileName}</b> <span style={{ opacity: 0.6, fontSize: 12 }}>{p.version ? `v${p.version} · ` : ""}{p.author ?? ""}</span>
-                                    {knownHere(p.name ?? "") && <Pill tone="accent">Vencord has it</Pill>}
-                                    {p.description && <div style={{ fontSize: 12, opacity: 0.7 }}>{p.description}</div>}
-                                </span>
-                                <Button size="small" variant="secondary" onClick={async () => {
-                                    if (src?.name === p.fileName) return setSrc(null);
-                                    try { setSrc({ name: p.fileName, text: await api.readSource(inst.root, "bd-plugins", p.fileName) }); } catch (e) { toastErr(e); }
-                                }}>{src?.name === p.fileName ? "Hide" : "Source"}</Button>
-                            </div>
-                            {src?.name === p.fileName && <div style={{ marginTop: 8 }}><Code text={src.text} /></div>}
-                        </div>
-                    ))}
+                    </p>
+                    {!bd.plugins.length && <Empty>No BetterDiscord plugins.</Empty>}
+                    <div className="vc-sx-col tight">
+                        {bd.plugins.map(p => {
+                            const open = src?.name === p.fileName;
+                            return (
+                                <div key={p.fileName} className="vc-sx-card compact">
+                                    <div className="vc-sx-row between nowrap">
+                                        <div className="vc-sx-grow">
+                                            <div className="vc-sx-row" style={{ gap: 6 }}>
+                                                <b className="vc-sx-ellipsis">{p.name ?? p.fileName}</b>
+                                                {knownHere(p.name ?? "") && <Pill tone="accent">Vencord has it</Pill>}
+                                            </div>
+                                            <div className="vc-sx-muted">
+                                                {[p.version && `v${p.version}`, p.author, p.description].filter(Boolean).join(" · ")}
+                                            </div>
+                                        </div>
+                                        <Button size="small" variant="secondary" onClick={async () => {
+                                            if (open) return setSrc(null);
+                                            try { setSrc({ name: p.fileName, text: await api.readSource(inst.root, "bd-plugins", p.fileName) }); } catch (e) { toastErr(e); }
+                                        }}>{open ? "Hide" : "Source"}</Button>
+                                    </div>
+                                    {open && <Code text={src.text} />}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
             {tab === "css" && (
-                <div style={{ display: "grid", gap: 6 }}>
-                    <div style={row}>
+                <div className="vc-sx-col">
+                    <div className="vc-sx-row">
                         <Button size="small" disabled={!bd.customCss} onClick={() => importQuickCss(bd.customCss, "append", `${inst.root} (BD custom.css)`)
                             .then(() => showToast({ text: "custom.css appended to QuickCSS", variant: "success" })).catch(toastErr)}>Append to my QuickCSS</Button>
                     </div>
                     <Code text={bd.customCss} />
                 </div>
             )}
-        </div>
+        </section>
     );
 }
 
@@ -403,36 +368,34 @@ function BrowseModal({ inst, modalProps }: { inst: Instance; modalProps: any; })
 
     return (
         <Modal {...modalProps} size="xl" title={`${KIND_LABEL[inst.kind]} — ${inst.label}`} subtitle={inst.root}>
-            <div style={{ padding: "4px 0 12px" }}>
-                {error && <Paragraph style={{ color: "#b83a3a" }}>{error}</Paragraph>}
-                {!d && !error && <Paragraph>Reading…</Paragraph>}
+            <Sx pad>
+                {error && <div className="vc-sx-card danger"><span className="vc-sx-err">{error}</span></div>}
+                {!d && !error && <Empty>Reading…</Empty>}
                 {d && (
                     <>
                         {d.mods.map(m => <ModView key={m.dir} inst={inst} mod={m} />)}
                         {d.bd && <BdView inst={inst} bd={d.bd} />}
                         {d.userplugins.length > 0 && (
-                            <div style={{ ...card, marginBottom: 10 }}>
-                                <Heading tag="h5" style={{ margin: "0 0 6px" }}>Source userplugins ({d.userplugins.length})</Heading>
-                                <div style={{ ...row, marginBottom: 8 }}>
+                            <section className="vc-sx-card">
+                                <h4>Source userplugins <Pill>{d.userplugins.length}</Pill></h4>
+                                <div className="vc-sx-pills">
                                     {d.userplugins.map(p => <Pill key={p} tone={knownHere(p) ? "accent" : "grey"}>{p}</Pill>)}
                                 </div>
-                                <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>Source plugins need a rebuild. Copy them into Sernicord with:</Paragraph>
-                                <Code text={`./sernicord scan --import plugins --from '${inst.root.replace(/'/g, "'\\''")}'`} />
-                            </div>
+                                <p className="vc-sx-hint">Source plugins need a rebuild. Copy them into Sernicord with:</p>
+                                <Code text={`./sernicord scan --import plugins --from ${shq(inst.root)}`} />
+                            </section>
                         )}
                         {inst.caps.session && (
-                            <div style={{ ...card, marginBottom: 10 }}>
-                                <Heading tag="h5" style={{ margin: "0 0 6px" }}>Discord session</Heading>
-                                <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
-                                    Login data is never copied from inside a running client. Stop Discord and use the CLI:
-                                </Paragraph>
-                                <Code text={`./sernicord stop && ./sernicord scan --import cache --from '${inst.root.replace(/'/g, "'\\''")}'`} />
-                            </div>
+                            <section className="vc-sx-card">
+                                <h4>Discord session</h4>
+                                <p className="vc-sx-hint">Login data is never copied from inside a running client. Stop Discord and use the CLI:</p>
+                                <Code text={`./sernicord stop && ./sernicord scan --import cache --from ${shq(inst.root)}`} />
+                            </section>
                         )}
-                        {!d.mods.length && !d.bd && !d.userplugins.length && !inst.caps.session && <Paragraph>Nothing importable here.</Paragraph>}
+                        {!d.mods.length && !d.bd && !d.userplugins.length && !inst.caps.session && <Empty>Nothing importable here.</Empty>}
                     </>
                 )}
-            </div>
+            </Sx>
         </Modal>
     );
 }
@@ -480,25 +443,27 @@ export function ScoutPanel() {
 
     useEffect(() => { if (consent && !lastScan) run(); }, [consent]);
 
-    if (!api) return <Paragraph>InstanceScout needs the desktop client (native side). Restart Discord fully after enabling it.</Paragraph>;
+    if (!api) return <Sx><Empty>InstanceScout needs the desktop client (native side). Restart Discord fully after enabling it.</Empty></Sx>;
 
     if (!consent) {
         return (
-            <div style={card}>
-                <Heading tag="h5" style={{ marginTop: 0 }}>Find other Discord installs?</Heading>
-                <Paragraph style={{ marginBottom: 10 }}>
-                    InstanceScout looks in the usual places (Discord stable/PTB/Canary, Vencord, Equicord, Vesktop,
-                    BetterDiscord, Flatpak/Snap, Sernicord checkouts) and in folders you add. It only <b>reads</b>;
-                    nothing is imported until you click an import button, and login data is never touched.
-                </Paragraph>
-                <Button onClick={() => { settings.store.consent = true; }}>Allow and scan</Button>
-            </div>
+            <Sx>
+                <section className="vc-sx-card">
+                    <h4>Find other Discord installs?</h4>
+                    <p className="vc-sx-hint">
+                        InstanceScout looks in the usual places (Discord stable/PTB/Canary, Vencord, Equicord, Vesktop,
+                        BetterDiscord, Flatpak/Snap, Sernicord checkouts) and in folders you add. It only <b>reads</b>;
+                        nothing is imported until you click an import button, and login data is never touched.
+                    </p>
+                    <div className="vc-sx-row"><Button onClick={() => { settings.store.consent = true; }}>Allow and scan</Button></div>
+                </section>
+            </Sx>
         );
     }
 
     return (
-        <div style={{ display: "grid", gap: 10 }}>
-            <div style={row}>
+        <Sx>
+            <div className="vc-sx-row">
                 <Button size="small" disabled={busy} onClick={run}>{busy ? "Scanning…" : "Rescan"}</Button>
                 <Button size="small" variant="secondary" onClick={async () => {
                     try {
@@ -508,38 +473,40 @@ export function ScoutPanel() {
                         await run();
                     } catch (e) { toastErr(e); }
                 }}>Add folder…</Button>
-                <span style={{ flex: 1 }} />
+                {list && <span className="vc-sx-muted">{list.length} install(s) found</span>}
+                <span className="vc-sx-spacer" />
                 <Button size="small" variant="dangerSecondary" onClick={() => { settings.store.consent = false; lastScan = null; setList(null); }}>Revoke permission</Button>
             </div>
-            {list?.length === 0 && <Paragraph style={{ opacity: 0.7 }}>No other installs found. Add a folder by hand.</Paragraph>}
+            {!list && busy && <Empty>Scanning…</Empty>}
+            {list?.length === 0 && <Empty>No other installs found. Add a folder by hand.</Empty>}
             {list?.map(inst => (
-                <div key={inst.id} style={card}>
-                    <div style={{ ...row, justifyContent: "space-between" }}>
-                        <div style={{ minWidth: 0 }}>
-                            <div style={row}>
+                <section key={inst.id} className="vc-sx-card">
+                    <div className="vc-sx-row between nowrap">
+                        <div className="vc-sx-col tight vc-sx-grow">
+                            <div className="vc-sx-title">
                                 <Pill tone={inst.kind === "betterdiscord" ? "danger" : "accent"}>{KIND_LABEL[inst.kind]}</Pill>
-                                <b>{inst.label}</b>
+                                <span className="vc-sx-ellipsis">{inst.label}</span>
                             </div>
-                            <div style={{ ...mono, opacity: 0.6, margin: "2px 0 6px", overflowWrap: "anywhere" }}>{inst.root}</div>
-                            <div>
-                                {inst.caps.settings && <Pill>settings</Pill>}
-                                {inst.caps.quickCss && <Pill>QuickCSS</Pill>}
-                                {inst.caps.themes > 0 && <Pill>{inst.caps.themes} themes</Pill>}
-                                {inst.caps.bdPlugins > 0 && <Pill>{inst.caps.bdPlugins} BD plugins</Pill>}
-                                {inst.caps.bdCustomCss && <Pill>custom.css</Pill>}
-                                {inst.caps.userplugins > 0 && <Pill>{inst.caps.userplugins} userplugins</Pill>}
-                                {inst.caps.session && <Pill>session</Pill>}
+                            <div className="vc-sx-mono vc-sx-muted">{inst.root}</div>
+                            <div className="vc-sx-pills">
+                                {inst.caps.settings && <Pill tone="outline">settings</Pill>}
+                                {inst.caps.quickCss && <Pill tone="outline">QuickCSS</Pill>}
+                                {inst.caps.themes > 0 && <Pill tone="outline">{inst.caps.themes} themes</Pill>}
+                                {inst.caps.bdPlugins > 0 && <Pill tone="outline">{inst.caps.bdPlugins} BD plugins</Pill>}
+                                {inst.caps.bdCustomCss && <Pill tone="outline">custom.css</Pill>}
+                                {inst.caps.userplugins > 0 && <Pill tone="outline">{inst.caps.userplugins} userplugins</Pill>}
+                                {inst.caps.session && <Pill tone="outline">session</Pill>}
                                 {inst.mods.length > 1 && <Pill tone="aqua">{inst.mods.length} profiles</Pill>}
                             </div>
                         </div>
-                        <div style={row}>
+                        <div className="vc-sx-col tight" style={{ flex: "none" }}>
                             <Button size="small" onClick={() => openModal(p => <BrowseModal inst={inst} modalProps={p} />)}>Browse & import</Button>
-                            <Button size="small" variant="secondary" onClick={() => api.openFolder(inst.root).then(e => e && toastErr(e)).catch(toastErr)}>Open</Button>
+                            <Button size="small" variant="secondary" onClick={() => api.openFolder(inst.root).then(e => e && toastErr(e)).catch(toastErr)}>Open folder</Button>
                         </div>
                     </div>
-                </div>
+                </section>
             ))}
-        </div>
+        </Sx>
     );
 }
 
