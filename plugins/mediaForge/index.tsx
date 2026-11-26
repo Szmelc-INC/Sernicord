@@ -12,10 +12,10 @@ import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { Menu, React, showToast } from "@webpack/common";
 
+import { Empty, Pill, Sx } from "../szmelc/kit";
 import { addFromUrl, api, currentChannel, errText, hasNative, limitFor, MediaItem, mediaOfMessage, RemoteMedia, runJob, uploadToChannel } from "./client";
 import { humanBytes, Target } from "./planner";
 import managedStyle from "./styles.css?managed";
@@ -74,29 +74,35 @@ function pushPaths() {
 /** Tool status block, reused in Szmelc HQ. */
 export function ToolSummary() {
     const { tools, refresh } = useTools();
-    if (!hasNative()) return <Paragraph>Native side not loaded — fully restart Discord (not just Ctrl+R).</Paragraph>;
+    if (!hasNative()) return <Sx><Empty>Native side not loaded — fully restart Discord (not just Ctrl+R).</Empty></Sx>;
+    const missing = tools.filter(t => !t.path).length;
     return (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-            {tools.map(t => (
-                <span key={t.name} title={t.path ?? t.hint} style={{
-                    padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600,
-                    background: t.path ? "#105c5c" : "#750f0f", color: "#fff"
-                }}>{t.name}{t.path ? "" : " ✗"}</span>
-            ))}
-            <Button size="min" variant="secondary" onClick={refresh}>Re-detect</Button>
-        </div>
+        <Sx>
+            <div className="vc-sx-row">
+                <div className="vc-sx-pills">
+                    {tools.map(t => (
+                        <Pill key={t.name} tone={t.path ? "accent" : "danger"} title={t.path ?? t.hint}>
+                            {t.path ? "✓" : "✗"} {t.name}
+                        </Pill>
+                    ))}
+                </div>
+                <span className="vc-sx-muted">{missing ? `${missing} missing` : "all tools found"}</span>
+                <span className="vc-sx-spacer" />
+                <Button size="small" variant="secondary" onClick={refresh}>Re-detect</Button>
+            </div>
+        </Sx>
     );
 }
 
 function SettingsPanel() {
     return (
-        <div style={{ display: "grid", gap: 10 }}>
+        <Sx>
             <ToolSummary />
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="vc-sx-row">
                 <Button onClick={() => openStudio({ channelId: currentChannel()?.id })}>Open MediaForge</Button>
                 <Button variant="secondary" onClick={() => openStudio({ tab: "tools" })}>Tools & installs</Button>
             </div>
-        </div>
+        </Sx>
     );
 }
 

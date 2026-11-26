@@ -11,8 +11,6 @@ import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
-import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { chooseFile, saveFile } from "@utils/web";
@@ -23,6 +21,8 @@ import {
     Constants, GuildStore, Menu, React, RestAPI,
     SnowflakeUtils, showToast, useState
 } from "@webpack/common";
+
+import { Empty, Pill, Sx } from "../szmelc/kit";
 
 const Author = { name: "sernik", id: 0n };
 const MANIFEST_PREFIX = "DISCLOUD1:";
@@ -276,54 +276,61 @@ function StoragePanel() {
     const used = files.reduce((n, f) => n + f.size, 0);
 
     return (
-        <div>
-            <Paragraph style={{ marginBottom: 8, opacity: 0.75 }}>
+        <Sx>
+            <p className="vc-sx-hint">
                 One server = your private cloud. Files are chunked into a storage channel and
                 indexed as JSON in an index channel — you, your bots, anything with the Discord
                 API can list and fetch them. Perfect for backups and bot assets.
-            </Paragraph>
-            <Paragraph style={{ fontSize: 12 }}>
-                server: {guild ? guild.name : (settings.store.guildId || "not set")}
-                {files.length > 0 && <> · {files.length} file(s) · {fmtBytes(used)} stored</>}
-            </Paragraph>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "8px 0 16px" }}>
-                <Button disabled={busy} onClick={upload}>Upload file…</Button>
-                <Button variant="secondary" disabled={busy} onClick={refresh}>
-                    {files.length ? "Refresh" : "Open storage"}
-                </Button>
-            </div>
-            {files.length === 0
-                ? <Paragraph>No indexed files yet (or nothing loaded — hit Refresh).</Paragraph>
-                : files.map(f => (
-                    <div
-                        key={f.messageId}
-                        style={{
-                            padding: 10, marginBottom: 8, borderRadius: 8,
-                            background: "var(--background-secondary)"
-                        }}
-                    >
-                        <Heading tag="h5" style={{ margin: 0, wordBreak: "break-all" }}>{f.name}</Heading>
-                        <Paragraph style={{ fontSize: 12, opacity: 0.7, margin: "2px 0 8px" }}>
-                            {fmtBytes(f.size)} · {f.parts.length} part(s) · {new Date(f.storedAt).toLocaleString()}
-                        </Paragraph>
-                        <div style={{ display: "flex", gap: 6 }}>
-                            <Button size="small" disabled={busy} onClick={() => downloadFile(f)}>Download</Button>
-                            <Button
-                                size="small" variant="dangerSecondary" disabled={busy}
-                                onClick={() => { setBusy(true); deleteFile(f).then(refresh).finally(() => setBusy(false)); }}
-                            >
-                                Delete
-                            </Button>
-                        </div>
+            </p>
+            <section className="vc-sx-card">
+                <div className="vc-sx-row between">
+                    <div className="vc-sx-pills">
+                        <Pill tone={guild ? "accent" : "danger"}>{guild ? guild.name : (settings.store.guildId || "server not set")}</Pill>
+                        {files.length > 0 && <Pill>{files.length} file(s)</Pill>}
+                        {files.length > 0 && <Pill>{fmtBytes(used)}</Pill>}
                     </div>
-                ))}
+                    <div className="vc-sx-row">
+                        <Button size="small" disabled={busy} onClick={upload}>Upload file…</Button>
+                        <Button size="small" variant="secondary" disabled={busy} onClick={refresh}>
+                            {files.length ? "Refresh" : "Open storage"}
+                        </Button>
+                    </div>
+                </div>
+            </section>
+            {files.length === 0
+                ? <Empty>No indexed files yet (or nothing loaded — hit Open storage).</Empty>
+                : (
+                    <div className="vc-sx-col tight">
+                        {files.map(f => (
+                            <div key={f.messageId} className="vc-sx-card compact">
+                                <div className="vc-sx-row between nowrap">
+                                    <div className="vc-sx-col tight vc-sx-grow">
+                                        <b className="vc-sx-ellipsis" title={f.name}>{f.name}</b>
+                                        <span className="vc-sx-muted">
+                                            {fmtBytes(f.size)} · {f.parts.length} part(s) · {new Date(f.storedAt).toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="vc-sx-row nowrap">
+                                        <Button size="small" disabled={busy} onClick={() => downloadFile(f)}>Download</Button>
+                                        <Button
+                                            size="small" variant="dangerSecondary" disabled={busy}
+                                            onClick={() => { setBusy(true); deleteFile(f).then(refresh).finally(() => setBusy(false)); }}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             {files.length > 0 && (
-                <Paragraph style={{ fontSize: 11, opacity: 0.6 }}>
+                <p className="vc-sx-hint" style={{ fontSize: 12 }}>
                     Bots: read the latest <code>{MANIFEST_PREFIX}</code> messages from the index channel —
                     each one lists part attachment URLs, in order, with a SHA-256 of the assembled file.
-                </Paragraph>
+                </p>
             )}
-        </div>
+        </Sx>
     );
 }
 
