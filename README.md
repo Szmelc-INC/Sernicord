@@ -155,7 +155,8 @@ Bundled plugins:
 | `localArchive` | Local archives |
 | `secureChat` | E2E-ish chat encrypt/decrypt (shared passphrase) |
 | `omniSearch` | Universal in-client search (`/omnisearch`) |
-| `profileVault` | Favorite settings/plugins/themes profiles |
+| `profileVault` | Favorite settings/plugins/themes profiles; lossless switching (also from the szmelc tab), JSON import/export |
+| `instanceScout` | Finds other Discord / Vencord / Equicord / Vesktop / BetterDiscord / Sernicord installs (with permission); browse and import plugin sets, themes, theme links, QuickCSS / BD custom.css, or make a switchable profile from them |
 | `botLens` | Bot-token API browser GUI (no user-session swap) |
 | `embedForge` | Custom embeds / interactive link buttons |
 | `secretSentinel` | Pattern watcher; alerts stored locally |
