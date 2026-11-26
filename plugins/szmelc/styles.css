@@ -1,0 +1,57 @@
+/* Szmelc HQ */
+.vc-hq { color: var(--text-normal); display: flex; flex-direction: column; gap: 12px; }
+.vc-hq * { box-sizing: border-box; }
+.vc-hq-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vc-hq-head h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: .5px; color: var(--header-primary); }
+.vc-hq-sub { font-size: 12px; color: var(--text-muted); }
+.vc-hq-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.vc-hq-chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #1b1b1b; border: 1px solid #262626; color: #c0c0c0; }
+.vc-hq-chip b { color: var(--text-normal); }
+.vc-hq-chip.accent { background: #105c5c; border-color: #105c5c; color: #fff; }
+.vc-hq-chip.danger { background: #750f0f; border-color: #750f0f; color: #fff; }
+.vc-hq-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid #262626; padding-bottom: 8px; }
+.vc-hq-tab { background: transparent; border: 0; color: var(--text-muted); font-weight: 700; font-size: 14px; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+.vc-hq-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.vc-hq-tab[aria-selected="true"] { background: #105c5c; color: #fff; }
+.vc-hq-tab .n { font-weight: 600; opacity: .75; margin-left: 4px; font-size: 12px; }
+.vc-hq button:focus-visible, .vc-hq input:focus-visible, .vc-hq [tabindex]:focus-visible { outline: 2px solid #7fffd4; outline-offset: 2px; }
+.vc-hq-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 8px; background: #131313; border: 1px solid #1f8a8a; }
+.vc-hq-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.vc-hq-search { flex: 1; min-width: 180px; background: #0b0b0b; border: 1px solid #262626; color: var(--text-normal); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.vc-hq-seg { display: inline-flex; border: 1px solid #262626; border-radius: 8px; overflow: hidden; }
+.vc-hq-seg button { background: #131313; color: var(--text-muted); border: 0; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.vc-hq-seg button[aria-pressed="true"] { background: #1b1b1b; color: #1f8a8a; }
+.vc-hq-group { display: flex; flex-direction: column; gap: 6px; }
+.vc-hq-group h3 { margin: 6px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #c0c0c0; font-weight: 800; }
+.vc-hq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; }
+.vc-hq-mod { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 8px; background: var(--background-secondary); border: 1px solid #262626; }
+.vc-hq-mod.on { border-color: #105c5c; }
+.vc-hq-mod .name { font-weight: 700; font-size: 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.vc-hq-mod .desc { font-size: 12px; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vc-hq-pill { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: #262626; color: #c0c0c0; }
+.vc-hq-pill.on { background: #105c5c; color: #fff; }
+.vc-hq-pill.hot { background: #7fffd4; color: #000; }
+.vc-hq-card { padding: 12px; border-radius: 8px; background: var(--background-secondary); border: 1px solid #262626; display: flex; flex-direction: column; gap: 8px; }
+.vc-hq-card h4 { margin: 0; font-size: 14px; color: var(--header-primary); }
+.vc-hq-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.vc-hq-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.vc-hq-theme { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: var(--background-secondary); border: 1px solid #262626; }
+
+/* Sernicord badge */
+.vc-szmelc-badge {
+    position: fixed;
+    left: 8px;
+    bottom: 8px;
+    z-index: 9999;
+    background: #105c5c;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    opacity: 0.9;
+    pointer-events: none;
+    text-transform: uppercase;
+    box-shadow: 0 0 0 1px rgba(127, 255, 212, 0.25);
+}

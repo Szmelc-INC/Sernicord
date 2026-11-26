@@ -12,7 +12,6 @@ import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { copyWithToast } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
@@ -36,6 +35,7 @@ import {
 } from "@webpack/common";
 import { strToU8, zipSync } from "fflate";
 
+import { cx, Empty, Pill, Sx, Tabs } from "../szmelc/kit";
 import { detect, DetectOptions, Hit, mask } from "./detect";
 import { CATEGORIES, Category, Confidence } from "./lexicon";
 import { Bounds, guildChannels, messages, mutualGuilds, privateChannelsWith, sleep, Source } from "./scan";
@@ -485,16 +485,12 @@ function Highlighted({ f }: { f: Finding; }) {
     for (const [i, h] of [...f.hits].sort((a, b) => a.start - b.start).entries()) {
         if (h.start < at) continue;
         parts.push(f.content.slice(at, h.start));
-        parts.push(<mark key={i} style={{ background: "#750f0f", color: "#fff", borderRadius: 3, padding: "0 2px" }}>{f.content.slice(h.start, h.end)}</mark>);
+        parts.push(<mark key={i} className="vc-sx-hit">{f.content.slice(h.start, h.end)}</mark>);
         at = h.end;
     }
     parts.push(f.content.slice(at));
-    return <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "6px 0", color: "var(--text-normal)" }}>{parts}</div>;
+    return <div className="vc-sx-pre vc-sx-code" style={{ fontFamily: "inherit", fontSize: 14 }}>{parts}</div>;
 }
-
-const tag = (text: string, bg: string, fg = "#fff") => (
-    <span style={{ background: bg, color: fg, borderRadius: 4, padding: "1px 6px", fontSize: 11, marginRight: 4, display: "inline-block" }}>{text}</span>
-);
 
 function FindingRow({ f, close }: { f: Finding; close: () => void; }) {
     const set = async (status: Status) => {
@@ -502,28 +498,30 @@ function FindingRow({ f, close }: { f: Finding; close: () => void; }) {
         await persist();
     };
     return (
-        <div style={{ borderTop: "1px solid #262626", padding: "8px 0", opacity: f.status === "dismissed" ? 0.5 : 1 }}>
-            <div style={{ fontSize: 12, color: "#c0c0c0" }}>
-                <b>{f.author}</b> · {f.where} · {new Date(f.at).toLocaleString()}
+        <div className={cx("vc-sx-card", f.status === "dismissed" && "dim", f.status === "reported" && "active")}>
+            <div className="vc-sx-row between">
+                <div className="vc-sx-muted"><b style={{ color: "var(--header-primary)" }}>{f.author}</b> · {f.where} · {new Date(f.at).toLocaleString()}</div>
+                {f.status !== "new" && <Pill tone={f.status === "reported" ? "accent" : "grey"}>{f.status}</Pill>}
             </div>
             <Highlighted f={f} />
-            <div>
+            <div className="vc-sx-pills">
                 {f.hits.map((h, i) => (
-                    <span key={i}>
-                        {tag(`${h.policy}`, h.policy.includes("Violent") || h.cat === "self_harm" ? "#750f0f" : "#105c5c")}
-                        {tag(`${h.raw} → ${h.canonical}`, "#1b1b1b", "#c0c0c0")}
-                        {h.evasion && tag("evasion", "#7fffd4", "#000")}
-                        {h.context && tag(`next to: ${h.context}`, "#1b1b1b", "#c0c0c0")}
-                        {tag(h.conf, "#1b1b1b", "#c0c0c0")}
-                    </span>
+                    <React.Fragment key={i}>
+                        <Pill tone={h.policy.includes("Violent") || h.cat === "self_harm" ? "danger" : "accent"}>{h.policy}</Pill>
+                        <Pill tone="outline">{h.raw} → {h.canonical}</Pill>
+                        {h.evasion && <Pill tone="aqua">evasion</Pill>}
+                        {h.context && <Pill tone="outline">next to: {h.context}</Pill>}
+                        <Pill tone="outline">{h.conf}</Pill>
+                    </React.Fragment>
                 ))}
             </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+            <div className="vc-sx-row">
                 <Button size="small" onClick={() => {
                     NavigationRouter.transitionTo(`/channels/${f.guildId ?? "@me"}/${f.channelId}/${f.id}`);
                     close();
                 }}>Jump</Button>
                 <Button size="small" variant="secondary" onClick={() => copyWithToast(jumpUrl(f), "Link copied")}>Copy link</Button>
+                <span className="vc-sx-spacer" />
                 <Button size="small" variant={f.status === "reported" ? "primary" : "secondary"} onClick={() => set("reported")}>
                     {f.status === "reported" ? "✓ Reported" : "Mark reported"}
                 </Button>
@@ -548,36 +546,38 @@ function ResultsModal({ modalProps }: { modalProps: RenderModalProps; }) {
         (!q || `${f.author} ${f.authorId} ${f.where}`.toLowerCase().includes(q.toLowerCase()))
     ).sort((a, b) => b.at.localeCompare(a.at));
     const count = (s: Status) => all.filter(f => f.status === s).length;
-    const chip = (active: boolean, label: string, onClick: () => void) => (
-        <Button size="small" variant={active ? "primary" : "secondary"} onClick={onClick}>{label}</Button>
-    );
+    const cats = (Object.keys(CATEGORIES) as Category[]).filter(c => all.some(f => f.hits.some(h => h.cat === c)));
 
     return (
-        <Modal {...modalProps} size="lg" title={`FullCyberJacket: findings (${all.length})`}>
-            <div>
-                <Paragraph style={{ margin: "8px 0" }}>
+        <Modal {...modalProps} size="lg" title="FullCyberJacket: findings" subtitle={`${all.length} total`}>
+            <Sx pad>
+                <p className="vc-sx-hint">
                     Read each finding in context before reporting: Jump → right-click the message → Report, then pick the
                     reason shown in the tag. Dismiss anything that is a quote, a reclaimed word or a joke between friends.
-                </Paragraph>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                    {chip(status === "new", `New (${count("new")})`, () => setStatusFilter("new"))}
-                    {chip(status === "reported", `Reported (${count("reported")})`, () => setStatusFilter("reported"))}
-                    {chip(status === "dismissed", `Dismissed (${count("dismissed")})`, () => setStatusFilter("dismissed"))}
-                    {chip(status === "all", "All", () => setStatusFilter("all"))}
+                </p>
+                <Tabs<Status | "all"> label="Status" value={status} onChange={setStatusFilter} tabs={[
+                    ["new", "New", count("new")],
+                    ["reported", "Reported", count("reported")],
+                    ["dismissed", "Dismissed", count("dismissed")],
+                    ["all", "All", all.length]
+                ]} />
+                <div className="vc-sx-row nowrap">
+                    <div className="vc-sx-grow"><TextInput value={q} onChange={setQ} placeholder="Filter by author, ID or place…" /></div>
+                    {cats.length > 0 && (
+                        <Tabs<Category | "all"> inline label="Category" value={cat} onChange={setCat}
+                            tabs={[["all", "Any"], ...cats.map(c => [c, c.replace("_", " ")] as [Category, string])]} />
+                    )}
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                    {chip(cat === "all", "Any category", () => setCat("all"))}
-                    {(Object.keys(CATEGORIES) as Category[])
-                        .filter(c => all.some(f => f.hits.some(h => h.cat === c)))
-                        .map(c => <span key={c}>{chip(cat === c, c.replace("_", " "), () => setCat(c))}</span>)}
-                </div>
-                <TextInput value={q} onChange={setQ} placeholder="Filter by author, ID or place…" />
-                <div style={{ marginTop: 8 }}>
+                <div className="vc-sx-col">
                     {list.slice(0, limit).map(f => <FindingRow key={f.id} f={f} close={modalProps.onClose} />)}
-                    {!list.length && <Paragraph>No findings here.</Paragraph>}
-                    {list.length > limit && <Button size="small" variant="secondary" onClick={() => setLimit(l => l + 100)}>Show more ({list.length - limit} left)</Button>}
+                    {!list.length && <Empty>No findings here.</Empty>}
+                    {list.length > limit && (
+                        <div className="vc-sx-row" style={{ justifyContent: "center" }}>
+                            <Button size="small" variant="secondary" onClick={() => setLimit(l => l + 100)}>Show more ({list.length - limit} left)</Button>
+                        </div>
+                    )}
                 </div>
-            </div>
+            </Sx>
         </Modal>
     );
 }
@@ -594,34 +594,44 @@ function ScanPanel() {
         <Button size="small" disabled={disabled} onClick={run}>{label}</Button>
     );
     const fresh = results.filter(f => f.status === "new").length;
+    const isId = (v: string) => /^\d{15,22}$/.test(v.trim());
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Heading tag="h4">Scan</Heading>
-            <Paragraph>
-                User ID to scan (empty = every author; only for a channel or one server). Right-click a user,
-                message or server for the same actions.
-            </Paragraph>
-            <TextInput value={userId} onChange={setUserId} placeholder="User ID (Developer Mode → Copy User ID)" />
-            <TextInput value={guildId} onChange={setGuildId} placeholder="Server ID (optional, for “Server by ID”)" />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {btn("This channel", () => start("channel", userId))}
-                {btn("This server", () => start("guild", userId))}
-                {btn("Server by ID", () => start("guild", userId, guildId.trim()), job.running || !/^\d{15,22}$/.test(guildId.trim()))}
-                {btn("Everywhere (shared servers + DMs)", () => start("everywhere", userId), job.running || !/^\d{15,22}$/.test(userId.trim()))}
-                <Button size="small" variant="dangerPrimary" disabled={!job.running} onClick={() => { job.abort = true; }}>Stop</Button>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Button size="small" variant="secondary" onClick={openResults}>Review findings ({fresh} new / {results.length})</Button>
-                <Button size="small" variant="secondary" onClick={exportFindings}>Export ZIP (json, csv, links)</Button>
-                <Button size="small" variant="secondary" disabled={job.running} onClick={() => flushWebhook()}>Post unsent to webhook</Button>
-                <Button size="small" variant="dangerSecondary" disabled={job.running} onClick={async () => {
-                    results = [];
-                    await persist();
-                }}>Clear findings</Button>
-            </div>
-            <Paragraph>{job.status}</Paragraph>
-        </div>
+        <Sx>
+            <section className="vc-sx-card">
+                <h4>Scan {job.running && <Pill tone="aqua">running</Pill>}</h4>
+                <p className="vc-sx-hint">
+                    User ID to scan (empty = every author; only for a channel or one server). Right-click a user,
+                    message or server for the same actions.
+                </p>
+                <div className="vc-sx-grid" style={{ "--sx-min": "240px" } as React.CSSProperties}>
+                    <TextInput value={userId} onChange={setUserId} placeholder="User ID (Developer Mode → Copy User ID)" />
+                    <TextInput value={guildId} onChange={setGuildId} placeholder="Server ID (optional, for “Server by ID”)" />
+                </div>
+                <div className="vc-sx-row">
+                    {btn("This channel", () => start("channel", userId))}
+                    {btn("This server", () => start("guild", userId))}
+                    {btn("Server by ID", () => start("guild", userId, guildId.trim()), job.running || !isId(guildId))}
+                    {btn("Everywhere (shared servers + DMs)", () => start("everywhere", userId), job.running || !isId(userId))}
+                    <span className="vc-sx-spacer" />
+                    <Button size="small" variant="dangerPrimary" disabled={!job.running} onClick={() => { job.abort = true; }}>Stop</Button>
+                </div>
+                {job.status && <div className="vc-sx-mono vc-sx-muted">{job.status}</div>}
+            </section>
+            <section className="vc-sx-card">
+                <h4>Findings <Pill tone={fresh ? "danger" : "grey"}>{fresh} new</Pill><Pill>{results.length} total</Pill></h4>
+                <div className="vc-sx-row">
+                    <Button size="small" onClick={openResults}>Review findings</Button>
+                    <Button size="small" variant="secondary" onClick={exportFindings}>Export ZIP (json, csv, links)</Button>
+                    <Button size="small" variant="secondary" disabled={job.running} onClick={() => flushWebhook()}>Post unsent to webhook</Button>
+                    <span className="vc-sx-spacer" />
+                    <Button size="small" variant="dangerSecondary" disabled={job.running || !results.length} onClick={async () => {
+                        results = [];
+                        await persist();
+                    }}>Clear findings</Button>
+                </div>
+            </section>
+        </Sx>
     );
 }
 

@@ -34,3 +34,14 @@ Bundled plugins:
 
 Local-only experiments can live directly under a cloned target’s `src/userplugins/`;
 only what you put here is meant for the public Sernicord repo.
+
+## UI conventions
+
+- Build panels and modals from the shared kit in `szmelc/kit.tsx` + `szmelc/kit.css`
+  (`Sx` root, `vc-sx-card` / `vc-sx-row` / `vc-sx-col` / `vc-sx-grid`, `Pill`, `Tabs`, `Check`,
+  `Toggle`, `Code`, `Empty`, `vc-sx-muted` / `vc-sx-hint`). It uses the Szmelc palette and the
+  active Discord theme's surfaces; avoid inline style objects, hard-coded hex colours and
+  `opacity` for muted text.
+- Plugin stylesheets go in a `.css` file: `import managedStyle from "./styles.css?managed"`
+  and pass `managedStyle` to `definePlugin`. Passing a raw CSS string makes `enableStyle`
+  throw, so the plugin loads unstyled; `./sernicord check` flags it.

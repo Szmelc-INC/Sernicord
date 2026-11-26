@@ -5,11 +5,10 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
-import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { React, showToast, TextInput, useEffect, useState } from "@webpack/common";
 
+import { cx, Empty, Pill, Sx } from "../szmelc/kit";
 import {
     deleteProfile, getActiveProfile, loadVault, onVaultChange, snapshotCurrent, sortProfiles,
     switchProfile, uniqueProfileName, upsertProfile, Vault, VaultEntry
@@ -57,8 +56,6 @@ async function importEntryFile(file: File) {
     return name;
 }
 
-const row: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" };
-
 /** Compact profile list with switch/favorite/export/delete. Reused by Szmelc HQ. */
 export function ProfileList({ compact = false }: { compact?: boolean; }) {
     const { vault, active } = useVault();
@@ -77,61 +74,50 @@ export function ProfileList({ compact = false }: { compact?: boolean; }) {
     };
 
     const sorted = sortProfiles(vault.entries);
-    if (sorted.length === 0) return <Paragraph style={{ opacity: 0.7 }}>No profiles yet.</Paragraph>;
+    if (sorted.length === 0) return <Sx><Empty>No profiles yet. Save the current setup above to create one.</Empty></Sx>;
 
     return (
-        <div style={{ display: "grid", gap: 6 }}>
-            {sorted.map(entry => {
-                const isActive = entry.name === active;
-                return (
-                    <div
-                        key={entry.name}
-                        style={{
-                            padding: compact ? "6px 10px" : 10,
-                            borderRadius: 8,
-                            background: "var(--background-secondary)",
-                            border: `1px solid ${isActive ? "#1f8a8a" : "var(--background-modifier-accent)"}`
-                        }}
-                    >
-                        <div style={{ ...row, justifyContent: "space-between" }}>
-                            <div style={{ minWidth: 0 }}>
-                                <Heading tag="h5" style={{ margin: 0 }}>
-                                    {entry.favorite ? "★ " : ""}{entry.name}
-                                    {isActive && (
-                                        <span style={{
-                                            marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 10,
-                                            background: "#105c5c", color: "#fff", textTransform: "uppercase"
-                                        }}>active</span>
-                                    )}
-                                </Heading>
-                                <Paragraph style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>
-                                    {new Date(entry.updatedAt).toLocaleString()}
-                                    {entry.source ? ` · from ${entry.source}` : ""}
-                                    {entry.note ? ` · ${entry.note}` : ""}
-                                </Paragraph>
-                            </div>
-                            <div style={row}>
-                                <Button size="small" disabled={busy || isActive}
-                                    onClick={run(() => switchProfile(entry.name), `Switched to "${entry.name}". Ctrl+R to apply everything.`)}>
-                                    Switch
-                                </Button>
-                                <Button size="small" variant="secondary" disabled={busy}
-                                    onClick={run(() => upsertProfile({ ...entry, favorite: !entry.favorite }))}>
-                                    {entry.favorite ? "★" : "☆"}
-                                </Button>
-                                {!compact && <Button size="small" variant="secondary" onClick={() => exportEntry(entry)}>Export</Button>}
-                                {!compact && (
-                                    <Button size="small" variant="dangerSecondary" disabled={busy}
-                                        onClick={run(() => deleteProfile(entry.name), `Deleted "${entry.name}"`)}>
-                                        Delete
+        <Sx>
+            <div className="vc-sx-col tight">
+                {sorted.map(entry => {
+                    const isActive = entry.name === active;
+                    return (
+                        <div key={entry.name} className={cx("vc-sx-card", compact && "compact", isActive && "active")}>
+                            <div className="vc-sx-row between nowrap">
+                                <div className="vc-sx-col tight vc-sx-grow">
+                                    <div className="vc-sx-title">
+                                        {entry.favorite && <span className="vc-sx-ok" aria-label="favorite">★</span>}
+                                        <span className="vc-sx-ellipsis">{entry.name}</span>
+                                        {isActive && <Pill tone="accent">active</Pill>}
+                                    </div>
+                                    <div className="vc-sx-muted vc-sx-ellipsis">
+                                        {[new Date(entry.updatedAt).toLocaleString(), entry.source && `from ${entry.source}`, entry.note].filter(Boolean).join(" · ")}
+                                    </div>
+                                </div>
+                                <div className="vc-sx-row nowrap">
+                                    <Button size="small" disabled={busy || isActive}
+                                        onClick={run(() => switchProfile(entry.name), `Switched to "${entry.name}". Ctrl+R to apply everything.`)}>
+                                        {isActive ? "Current" : "Switch"}
                                     </Button>
-                                )}
+                                    <Button size="small" variant="secondary" disabled={busy}
+                                        aria-label={entry.favorite ? "Unfavorite" : "Favorite"}
+                                        onClick={run(() => upsertProfile({ ...entry, favorite: !entry.favorite }))}>
+                                        {entry.favorite ? "★" : "☆"}
+                                    </Button>
+                                    {!compact && <Button size="small" variant="secondary" onClick={() => exportEntry(entry)}>Export</Button>}
+                                    {!compact && (
+                                        <Button size="small" variant="dangerSecondary" disabled={busy}
+                                            onClick={run(() => deleteProfile(entry.name), `Deleted "${entry.name}"`)}>
+                                            Delete
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                );
-            })}
-        </div>
+                    );
+                })}
+            </div>
+        </Sx>
     );
 }
 
@@ -159,20 +145,21 @@ export function ProfileSaveBar() {
     };
 
     return (
-        <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Sx>
+            <div className="vc-sx-grid" style={{ "--sx-min": "180px" } as React.CSSProperties}>
                 <TextInput placeholder="Profile name" value={name} onChange={setName} />
                 <TextInput placeholder="Optional note" value={note} onChange={setNote} />
             </div>
-            <div style={row}>
-                <Button size="small" disabled={busy} onClick={() => save(false)}>Save current</Button>
-                <Button size="small" variant="positive" disabled={busy} onClick={() => save(true)}>Save as ★</Button>
+            <div className="vc-sx-row">
+                <Button size="small" disabled={busy || !name.trim()} onClick={() => save(false)}>Save current</Button>
+                <Button size="small" variant="positive" disabled={busy || !name.trim()} onClick={() => save(true)}>Save as ★</Button>
+                <span className="vc-sx-spacer" />
                 <Button size="small" variant="secondary" onClick={() => fileRef.current?.click()}>Import .json</Button>
                 <input
                     ref={fileRef}
                     type="file"
                     accept="application/json,.json"
-                    style={{ display: "none" }}
+                    hidden
                     onChange={async e => {
                         const input = e.currentTarget;
                         const f = input.files?.[0];
@@ -186,22 +173,26 @@ export function ProfileSaveBar() {
                     }}
                 />
             </div>
-        </div>
+        </Sx>
     );
 }
 
 function VaultPanel() {
     return (
-        <div style={{ display: "grid", gap: 12 }}>
-            <Paragraph>
+        <Sx>
+            <p className="vc-sx-hint">
                 Snapshots include plugin enablement, plugin settings, themes, theme links, and QuickCSS.
                 Profiles stay in local DataStore (not cloud). Switching saves the state before the switch as
                 "Autosave" (named profiles change only when you save them), keeps plugins a profile doesn't
                 mention as they are, and never turns ProfileVault / Szmelc off. Reload Discord after switching.
-            </Paragraph>
-            <ProfileSaveBar />
+            </p>
+            <section className="vc-sx-card">
+                <h4>Save current setup</h4>
+                <ProfileSaveBar />
+            </section>
+            <div className="vc-sx-section">Profiles</div>
             <ProfileList />
-        </div>
+        </Sx>
     );
 }
 

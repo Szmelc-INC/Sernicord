@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { enableStyle } from "@api/Styles";
 import { Button } from "@components/Button";
 import { ChannelStore, DraftType, Modal, openModal, React, showToast, UploadHandler, useEffect, useMemo, useState } from "@webpack/common";
 
@@ -12,44 +13,11 @@ import {
 } from "./client";
 import type { FileInfo, JobSpec, JobStatus, PlayerStatus, ToolStatus } from "./native";
 import { EditOptions, humanBytes, LIMITS, Target } from "./planner";
+import studioStyle from "./styles.css?managed";
 
-export const STUDIO_CSS = `
-.vc-mf { display: grid; grid-template-columns: 260px 1fr; gap: 12px; min-height: 520px; color: var(--text-normal); }
-.vc-mf * { box-sizing: border-box; }
-.vc-mf-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.vc-mf-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-accent, #262626); border-radius: 8px; padding: 10px; }
-.vc-mf-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.vc-mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.vc-mf-list { display: flex; flex-direction: column; gap: 4px; overflow: auto; max-height: 430px; }
-.vc-mf-item { display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
-.vc-mf-item:hover { background: var(--background-modifier-hover); }
-.vc-mf-item[aria-selected="true"] { border-color: #1f8a8a; background: rgba(31,138,138,.12); }
-.vc-mf-item b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.vc-mf-sub { font-size: 11px; color: var(--text-muted); }
-.vc-mf-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid #262626; padding-bottom: 6px; }
-.vc-mf-tab { background: transparent; color: var(--text-muted); border: 0; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; }
-.vc-mf-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-.vc-mf-tab[aria-selected="true"] { background: #105c5c; color: #fff; }
-.vc-mf label { font-size: 12px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
-.vc-mf label.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--text-normal); }
-.vc-mf input[type=text], .vc-mf input[type=number], .vc-mf select, .vc-mf textarea {
-  background: #0b0b0b; color: var(--text-normal); border: 1px solid #262626; border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 100%; }
-.vc-mf input:focus-visible, .vc-mf select:focus-visible, .vc-mf button:focus-visible, .vc-mf-item:focus-visible { outline: 2px solid #7fffd4; outline-offset: 1px; }
-.vc-mf-preview { background: #0b0b0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; min-height: 180px; max-height: 300px; overflow: hidden; }
-.vc-mf-preview video, .vc-mf-preview img { max-width: 100%; max-height: 300px; }
-.vc-mf-bar { height: 6px; border-radius: 3px; background: #262626; overflow: hidden; }
-.vc-mf-bar > i { display: block; height: 100%; background: #1f8a8a; transition: width .3s; }
-.vc-mf-pill { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #262626; color: #c0c0c0; }
-.vc-mf-pill.ok { background: #105c5c; color: #fff; }
-.vc-mf-pill.bad { background: #750f0f; color: #fff; }
-.vc-mf-pill.hot { background: #7fffd4; color: #000; }
-.vc-mf-err { color: #b83a3a; font-size: 13px; }
-.vc-mf-hint { font-size: 12px; color: var(--text-muted); }
-.vc-mf-drop { border: 1px dashed #262626; border-radius: 8px; padding: 10px; text-align: center; font-size: 12px; color: var(--text-muted); }
-.vc-mf-drop.on { border-color: #7fffd4; color: var(--text-normal); }
-.vc-mf code { font-family: var(--font-code); font-size: 11px; }
-@media (max-width: 900px) { .vc-mf { grid-template-columns: 1fr; } }
-`;
+/** Studio can be opened from Szmelc HQ while MediaForge itself is off: make sure its CSS is on. */
+const ensureStyle = () => { try { enableStyle(studioStyle); } catch { } };
+
 
 type Tab = "convert" | "split" | "join" | "fx" | "download" | "play" | "paint" | "tools";
 
@@ -591,6 +559,7 @@ function PlayTab({ item }: { item?: MediaItem; }) {
 }
 
 export async function openInPaint(file?: FileInfo) {
+    ensureStyle();
     try {
         let f = file;
         if (f && f.size > 1.4 * 1024 * 1024) {
@@ -767,6 +736,7 @@ function Studio({ modalProps, channelId, tab: tab0, target, url, focus }: Studio
 }
 
 export function openStudio(props: StudioProps = {}) {
+    ensureStyle();
     openModal(m => <Studio modalProps={m} {...props} />);
 }
 
@@ -843,5 +813,6 @@ export async function shrinkFiles(files: File[], limit: number, splitIfNeeded: b
 }
 
 export function openOversize(files: File[], channelId: string, limit: number, splitIfNeeded: boolean) {
+    ensureStyle();
     openModal(m => <OversizeModal modalProps={m} files={files} channelId={channelId} limit={limit} splitIfNeeded={splitIfNeeded} />);
 }

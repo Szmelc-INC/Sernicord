@@ -9,7 +9,6 @@
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Paragraph } from "@components/Paragraph";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { CloudUpload as TCloudUpload } from "@vencord/discord-types";
@@ -17,8 +16,10 @@ import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import { findLazy, findStoreLazy } from "@webpack";
 import {
     Constants, React, RestAPI, SnowflakeUtils, showToast,
-    UserSettingsActionCreators, useState
+    TextInput, UserSettingsActionCreators, useState
 } from "@webpack/common";
+
+import { Empty, Pill, Sx } from "../szmelc/kit";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -236,97 +237,66 @@ function GifManagerPanel() {
     };
 
     return (
-        <div>
-            <Paragraph style={{ marginBottom: 8, opacity: 0.75 }}>
-                {favs.length} favorite gif(s). Dump them all into a channel (URLs or files,
-                one under another) or suck every gif out of a channel into your favorites.
-            </Paragraph>
-
-            <div style={{
-                display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
-                padding: 10, borderRadius: 8, background: "var(--background-secondary)",
-                marginBottom: 8
-            }}>
-                <input
-                    className="vc-textinput"
-                    placeholder="Dump channel ID"
-                    value={dumpCh}
-                    style={{
-                        flex: 1, minWidth: 160, padding: "8px",
-                        borderRadius: 4, border: "1px solid var(--background-modifier-accent)",
-                        background: "var(--input-background)", color: "var(--text-normal)"
-                    }}
-                    onChange={e => {
-                        setDumpCh(e.currentTarget.value);
-                        settings.store.dumpChannelId = e.currentTarget.value;
-                    }}
-                />
-                <Button
-                    disabled={busy || !dumpCh}
-                    onClick={() => run(() => dumpFavorites(dumpCh.trim()))}
-                >
-                    Dump all favorites
-                </Button>
-            </div>
-
-            <div style={{
-                display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
-                padding: 10, borderRadius: 8, background: "var(--background-secondary)",
-                marginBottom: 16
-            }}>
-                <input
-                    className="vc-textinput"
-                    placeholder="Channel ID full of gifs to favorite"
-                    value={collectCh}
-                    style={{
-                        flex: 1, minWidth: 160, padding: "8px",
-                        borderRadius: 4, border: "1px solid var(--background-modifier-accent)",
-                        background: "var(--input-background)", color: "var(--text-normal)"
-                    }}
-                    onChange={e => setCollectCh(e.currentTarget.value)}
-                />
-                <Button
-                    variant="positive" disabled={busy || !collectCh}
-                    onClick={() => run(() => collectFromChannel(collectCh.trim()))}
-                >
-                    Suck into favorites
-                </Button>
-            </div>
-
-            {favs.length === 0 && <Paragraph>No favorites yet — star some gifs in the picker first.</Paragraph>}
-            {favs.map(([key, g]) => (
-                <div
-                    key={key}
-                    style={{
-                        display: "flex", alignItems: "center", gap: 10,
-                        padding: 8, marginBottom: 6, borderRadius: 8,
-                        background: "var(--background-secondary)"
-                    }}
-                >
-                    <img
-                        src={g.src || g.url}
-                        alt={g.name || "gif"}
-                        style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, background: "#0b0b0b" }}
+        <Sx>
+            <p className="vc-sx-hint">
+                Dump every favorite gif into a channel (URLs or files, one under another), or pull every gif
+                out of a channel into your favorites.
+            </p>
+            <div className="vc-sx-grid" style={{ "--sx-min": "260px" } as React.CSSProperties}>
+                <section className="vc-sx-card">
+                    <h4>Dump favorites</h4>
+                    <TextInput
+                        placeholder="Target channel ID"
+                        value={dumpCh}
+                        onChange={(v: string) => {
+                            setDumpCh(v);
+                            settings.store.dumpChannelId = v;
+                        }}
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <Paragraph style={{ margin: 0, fontSize: 13, wordBreak: "break-all" }}>
-                            {g.name || key.slice(0, 80)}
-                        </Paragraph>
-                        <Paragraph style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>
-                            {g.width && g.height ? `${g.width}×${g.height} · ` : ""}order #{g.order ?? "?"}
-                        </Paragraph>
+                    <div className="vc-sx-row">
+                        <Button size="small" disabled={busy || !dumpCh.trim() || !favs.length} onClick={() => run(() => dumpFavorites(dumpCh.trim()))}>
+                            Dump all {favs.length}
+                        </Button>
                     </div>
-                    <Button
-                        size="small" variant="dangerSecondary" disabled={busy}
-                        onClick={() => run(async () => {
-                            await removeFavorite(g.url || key);
-                        })}
-                    >
-                        Remove
-                    </Button>
-                </div>
-            ))}
-        </div>
+                </section>
+                <section className="vc-sx-card">
+                    <h4>Collect from a channel</h4>
+                    <TextInput placeholder="Channel ID full of gifs" value={collectCh} onChange={(v: string) => setCollectCh(v)} />
+                    <div className="vc-sx-row">
+                        <Button size="small" variant="positive" disabled={busy || !collectCh.trim()} onClick={() => run(() => collectFromChannel(collectCh.trim()))}>
+                            Add to favorites
+                        </Button>
+                    </div>
+                </section>
+            </div>
+
+            <div className="vc-sx-row">
+                <div className="vc-sx-section">Favorites</div>
+                <Pill>{favs.length}</Pill>
+                {busy && <span className="vc-sx-muted">working…</span>}
+            </div>
+            {favs.length === 0 && <Empty>No favorites yet — star some gifs in the picker first.</Empty>}
+            <div className="vc-sx-col tight vc-sx-scroll" style={{ "--sx-max": "420px" } as React.CSSProperties}>
+                {favs.map(([key, g]) => (
+                    <div key={key} className="vc-sx-card compact">
+                        <div className="vc-sx-row nowrap">
+                            <img className="vc-sx-thumb" src={g.src || g.url} alt={g.name || "gif"} loading="lazy" />
+                            <div className="vc-sx-col tight vc-sx-grow">
+                                <div className="vc-sx-ellipsis" style={{ fontSize: 13 }} title={g.name || key}>{g.name || key}</div>
+                                <div className="vc-sx-muted">
+                                    {g.width && g.height ? `${g.width}×${g.height} · ` : ""}order #{g.order ?? "?"}
+                                </div>
+                            </div>
+                            <Button size="small" variant="dangerSecondary" disabled={busy} onClick={() => run(async () => {
+                                await removeFavorite(g.url || key);
+                            })}>
+                                Remove
+                            </Button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </Sx>
     );
 }
 

@@ -10,8 +10,9 @@ import { removeFromArray } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { showToast } from "@webpack/common";
 
-import { HQ_CSS, SzmelcHQ } from "./hq";
-import { applyBadge, applyOg, applyTitle, BADGE_CSS, szmelcSettings, SzmelcIcon } from "./look";
+import { SzmelcHQ } from "./hq";
+import { applyBadge, applyOg, applyTitle, szmelcSettings, SzmelcIcon } from "./look";
+import managedStyle from "./styles.css?managed";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -23,7 +24,7 @@ export default definePlugin({
     authors: [Author],
     tags: ["Customisation", "Utility"],
     settings,
-    managedStyle: HQ_CSS + BADGE_CSS,
+    managedStyle,
 
     start() {
         applyOg(szmelcSettings.store.ogMode);

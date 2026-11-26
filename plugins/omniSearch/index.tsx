@@ -5,11 +5,12 @@
 
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { definePluginSettings,Settings } from "@api/Settings";
-import { Button } from "@components/Button";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { RenderModalProps } from "@vencord/discord-types";
-import { ChannelRouter, ChannelStore, GuildStore, MessageStore, Modal, NavigationRouter, openModal, openUserProfileModal, RelationshipStore, showToast, TextInput, useMemo, UserStore, useState } from "@webpack/common";
+import { ChannelRouter, ChannelStore, GuildStore, MessageStore, Modal, NavigationRouter, openModal, openUserProfileModal, React, RelationshipStore, showToast, TextInput, useMemo, UserStore, useState } from "@webpack/common";
+
+import { Empty, Pill, Sx } from "../szmelc/kit";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -202,35 +203,42 @@ function OmniModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const results = useMemo(() => (q.trim().length >= 2 ? collect(q) : []), [q]);
 
     return (
-        <Modal {...modalProps} size="md" title="OmniSearch">
-            <div>
+        <Modal {...modalProps} size="md" title="OmniSearch" subtitle="Servers, channels, DMs, friends, loaded messages, plugins, settings">
+            <Sx pad>
                 <TextInput
                     value={q}
-                    placeholder="Search everywhere…"
+                    placeholder="Search everywhere… (Enter opens the first hit)"
                     onChange={setQ}
+                    onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key !== "Enter" || !results[0]) return;
+                        results[0].action();
+                        modalProps.onClose();
+                    }}
                     autoFocus
                 />
-                <div style={{ marginTop: 12, maxHeight: 420, overflow: "auto" }}>
-                    {q.trim().length < 2 && <Paragraph>Type at least 2 characters.</Paragraph>}
+                {q.trim().length >= 2 && results.length > 0 && <div className="vc-sx-muted">{results.length} hit(s)</div>}
+                <div className="vc-sx-list vc-sx-scroll" style={{ "--sx-max": "420px" } as React.CSSProperties}>
                     {results.map((r, i) => (
-                        <Button
+                        <button
                             key={i}
-                            variant="secondary"
-                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
+                            type="button"
+                            className="vc-sx-item"
                             onClick={() => {
                                 r.action();
                                 modalProps.onClose();
                             }}
                         >
-                            <strong>[{r.kind}]</strong> {r.title}
-                            {r.subtitle && <div style={{ opacity: 0.7, fontSize: 12 }}>{r.subtitle}</div>}
-                        </Button>
+                            <div className="vc-sx-row nowrap" style={{ gap: 8 }}>
+                                <Pill tone={i === 0 ? "accent" : "grey"}>{r.kind}</Pill>
+                                <span className="vc-sx-ellipsis">{r.title}</span>
+                            </div>
+                            {r.subtitle && <div className="vc-sx-muted vc-sx-ellipsis" style={{ marginTop: 2 }}>{r.subtitle}</div>}
+                        </button>
                     ))}
-                    {q.trim().length >= 2 && results.length === 0 && (
-                        <Paragraph>No hits in currently loaded client data.</Paragraph>
-                    )}
                 </div>
-            </div>
+                {q.trim().length < 2 && <Empty>Type at least 2 characters.</Empty>}
+                {q.trim().length >= 2 && results.length === 0 && <Empty>No hits in currently loaded client data.</Empty>}
+            </Sx>
         </Modal>
     );
 }

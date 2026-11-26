@@ -6,11 +6,12 @@
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, openModal, React, ScrollerThin, showToast, TextInput, useEffect, useState } from "@webpack/common";
+
+import { Pill, Sx } from "../szmelc/kit";
 
 const Author = { name: "sernik", id: 0n };
 const API = "https://discord.com/api/v10";
@@ -131,67 +132,61 @@ function BotLensModal({ modalProps }: { modalProps: RenderModalProps; }) {
     }, []);
 
     return (
-        <Modal {...modalProps} size="lg" title="BotLens">
-            <div>
-                <Paragraph style={{ marginBottom: 8 }}>
-                    Separate bot API browser. Your normal Discord account stays untouched.
-                </Paragraph>
-                <TextInput
-                    type="password"
-                    value={token}
-                    placeholder="Bot token"
-                    onChange={setToken}
-                />
-                <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 12 }}>
-                    <Button disabled={busy} onClick={connect}>Connect</Button>
-                    {me && <Paragraph>@{me.username} ({me.id}) bot={String(me.bot)}</Paragraph>}
+        <Modal {...modalProps} size="lg" title="BotLens" subtitle="Separate bot API browser — your normal Discord account stays untouched.">
+            <Sx pad>
+                <div className="vc-sx-row nowrap">
+                    <div className="vc-sx-grow">
+                        <TextInput type="password" value={token} placeholder="Bot token" onChange={setToken} />
+                    </div>
+                    <Button disabled={busy || !token.trim()} onClick={connect}>{busy ? "Connecting…" : me ? "Reconnect" : "Connect"}</Button>
                 </div>
-                {error && <Paragraph style={{ color: "var(--status-danger)" }}>{error}</Paragraph>}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 8, minHeight: 360 }}>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Heading tag="h5">Guilds</Heading>
-                        {guilds.map(g => (
-                            <Button
-                                key={g.id}
-                                size="small"
-                                variant={guildId === g.id ? "primary" : "secondary"}
-                                style={{ display: "block", width: "100%", textAlign: "left" }}
-                                onClick={() => loadChannels(g.id)}
-                            >
-                                {g.name}
-                            </Button>
-                        ))}
+                {me && (
+                    <div className="vc-sx-row">
+                        <Pill tone="accent">@{me.username}</Pill>
+                        <span className="vc-sx-mono vc-sx-muted">{me.id}</span>
+                        {!me.bot && <Pill tone="danger">not a bot account</Pill>}
+                    </div>
+                )}
+                {error && <div className="vc-sx-card danger compact"><span className="vc-sx-err">{error}</span></div>}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.6fr", gap: 8, height: 400 }}>
+                    <ScrollerThin className="vc-sx-pane">
+                        <div className="vc-sx-section" style={{ padding: "2px 6px 6px" }}>Guilds · {guilds.length}</div>
+                        <div className="vc-sx-list" role="listbox" aria-label="Guilds">
+                            {guilds.map(g => (
+                                <button key={g.id} type="button" role="option" className="vc-sx-item vc-sx-ellipsis" aria-selected={guildId === g.id} onClick={() => loadChannels(g.id)}>
+                                    {g.name}
+                                </button>
+                            ))}
+                        </div>
+                        {!guilds.length && <p className="vc-sx-hint" style={{ padding: 6 }}>{me ? "The bot is in no guilds." : "Connect first."}</p>}
                     </ScrollerThin>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Heading tag="h5">Channels</Heading>
-                        {channels.map(c => (
-                            <Button
-                                key={c.id}
-                                size="small"
-                                variant={channelId === c.id ? "primary" : "secondary"}
-                                style={{ display: "block", width: "100%", textAlign: "left" }}
-                                onClick={() => loadMessages(c.id)}
-                            >
-                                #{c.name}
-                            </Button>
-                        ))}
+                    <ScrollerThin className="vc-sx-pane">
+                        <div className="vc-sx-section" style={{ padding: "2px 6px 6px" }}>Channels · {channels.length}</div>
+                        <div className="vc-sx-list" role="listbox" aria-label="Channels">
+                            {channels.map(c => (
+                                <button key={c.id} type="button" role="option" className="vc-sx-item vc-sx-ellipsis" aria-selected={channelId === c.id} onClick={() => loadMessages(c.id)}>
+                                    #{c.name}
+                                </button>
+                            ))}
+                        </div>
+                        {!channels.length && <p className="vc-sx-hint" style={{ padding: 6 }}>{guildId ? "No text channels." : "Pick a guild."}</p>}
                     </ScrollerThin>
-                    <ScrollerThin style={{ background: "var(--background-secondary)", borderRadius: 8, padding: 8 }}>
-                        <Heading tag="h5">Messages</Heading>
-                        {messages.map(m => (
-                            <div key={m.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--background-modifier-accent)" }}>
-                                <Paragraph style={{ fontSize: 12, opacity: 0.7 }}>
-                                    {m.author?.username} · {m.timestamp}
-                                </Paragraph>
-                                <Paragraph style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
-                                    {m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : "[empty/embed]")}
-                                </Paragraph>
-                            </div>
-                        ))}
-                        {!messages.length && <Paragraph>Select a channel.</Paragraph>}
+                    <ScrollerThin className="vc-sx-pane">
+                        <div className="vc-sx-section" style={{ padding: "2px 6px 6px" }}>Messages · {messages.length}</div>
+                        <div className="vc-sx-col" style={{ padding: "0 6px" }}>
+                            {messages.map(m => (
+                                <div key={m.id} className="vc-sx-col tight" style={{ paddingBottom: 8, borderBottom: "1px solid var(--sx-line)" }}>
+                                    <div className="vc-sx-muted"><b style={{ color: "var(--header-primary)" }}>{m.author?.username ?? "?"}</b> · {m.timestamp ? new Date(m.timestamp).toLocaleString() : ""}</div>
+                                    <div className="vc-sx-pre" style={{ fontSize: 13 }}>
+                                        {m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : "[empty/embed]")}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {!messages.length && <p className="vc-sx-hint" style={{ padding: 6 }}>{channelId ? "No messages." : "Pick a channel."}</p>}
                     </ScrollerThin>
                 </div>
-            </div>
+            </Sx>
         </Modal>
     );
 }
