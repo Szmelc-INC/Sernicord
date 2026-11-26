@@ -3,97 +3,153 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import * as DataStore from "@api/DataStore";
-import { definePluginSettings, PlainSettings } from "@api/Settings";
+import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import definePlugin, { OptionType } from "@utils/types";
 import { React, showToast, TextInput, useEffect, useState } from "@webpack/common";
 
+import {
+    deleteProfile, getActiveProfile, loadVault, onVaultChange, snapshotCurrent, sortProfiles,
+    switchProfile, uniqueProfileName, upsertProfile, Vault, VaultEntry
+} from "./store";
+
 const Author = { name: "sernik", id: 0n };
-const STORE_KEY = "SernicordProfileVault";
 
-type VaultEntry = {
-    name: string;
-    favorite?: boolean;
-    createdAt: number;
-    updatedAt: number;
-    note?: string;
-    payload: {
-        settings: any;
-        quickCss: string;
-    };
-};
-
-type Vault = { entries: VaultEntry[]; };
-
-async function loadVault(): Promise<Vault> {
-    return (await DataStore.get<Vault>(STORE_KEY)) ?? { entries: [] };
+export function useVault() {
+    const [vault, setVault] = useState<Vault>({ entries: [] });
+    const [active, setActive] = useState<string | null>(null);
+    useEffect(() => {
+        let alive = true;
+        const refresh = async () => {
+            const [v, a] = await Promise.all([loadVault(), getActiveProfile()]);
+            if (alive) { setVault(v); setActive(a); }
+        };
+        refresh();
+        const off = onVaultChange(refresh);
+        return () => { alive = false; off(); };
+    }, []);
+    return { vault, active };
 }
 
-async function saveVault(v: Vault) {
-    await DataStore.set(STORE_KEY, v);
-}
-
-async function snapshotCurrent(): Promise<VaultEntry["payload"]> {
-    const settings = typeof VencordNative !== "undefined"
-        ? VencordNative.settings.get()
-        : structuredClone(PlainSettings);
-    const quickCss = typeof VencordNative !== "undefined"
-        ? await VencordNative.quickCss.get()
-        : "";
-    return { settings, quickCss };
-}
-
-async function applyPayload(payload: VaultEntry["payload"]) {
-    if (!payload?.settings) throw new Error("Invalid profile payload");
-    Object.assign(PlainSettings, payload.settings);
-    if (typeof VencordNative !== "undefined") {
-        await VencordNative.settings.set(payload.settings);
-        await VencordNative.quickCss.set(payload.quickCss ?? "");
+function exportEntry(entry: VaultEntry) {
+    const json = JSON.stringify(entry, null, 2);
+    const fileName = `sernicord-profile-${entry.name.replace(/[^\w.-]+/g, "_")}.json`;
+    if (IS_DISCORD_DESKTOP) {
+        DiscordNative.fileManager.saveWithDialog(new TextEncoder().encode(json), fileName);
+    } else {
+        import("@utils/web").then(({ saveFile }) => saveFile(new File([json], fileName, { type: "application/json" })));
     }
 }
 
-function VaultPanel() {
-    const [vault, setVault] = useState<Vault>({ entries: [] });
+async function importEntryFile(file: File) {
+    const parsed = JSON.parse(await file.text());
+    if (!parsed?.payload?.settings) throw new Error("Not a Sernicord profile file");
+    const name = await uniqueProfileName(String(parsed.name || file.name.replace(/\.json$/i, "")));
+    await upsertProfile({
+        name,
+        note: parsed.note,
+        source: parsed.source ?? `imported file ${file.name}`,
+        favorite: !!parsed.favorite,
+        payload: { settings: parsed.payload.settings, quickCss: String(parsed.payload.quickCss ?? "") }
+    });
+    return name;
+}
+
+const row: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" };
+
+/** Compact profile list with switch/favorite/export/delete. Reused by Szmelc HQ. */
+export function ProfileList({ compact = false }: { compact?: boolean; }) {
+    const { vault, active } = useVault();
+    const [busy, setBusy] = useState(false);
+
+    const run = (fn: () => Promise<unknown>, ok?: string) => async () => {
+        setBusy(true);
+        try {
+            await fn();
+            if (ok) showToast({ text: ok, variant: "success" });
+        } catch (e) {
+            showToast({ text: String((e as Error)?.message ?? e), variant: "critical" });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const sorted = sortProfiles(vault.entries);
+    if (sorted.length === 0) return <Paragraph style={{ opacity: 0.7 }}>No profiles yet.</Paragraph>;
+
+    return (
+        <div style={{ display: "grid", gap: 6 }}>
+            {sorted.map(entry => {
+                const isActive = entry.name === active;
+                return (
+                    <div
+                        key={entry.name}
+                        style={{
+                            padding: compact ? "6px 10px" : 10,
+                            borderRadius: 8,
+                            background: "var(--background-secondary)",
+                            border: `1px solid ${isActive ? "#1f8a8a" : "var(--background-modifier-accent)"}`
+                        }}
+                    >
+                        <div style={{ ...row, justifyContent: "space-between" }}>
+                            <div style={{ minWidth: 0 }}>
+                                <Heading tag="h5" style={{ margin: 0 }}>
+                                    {entry.favorite ? "★ " : ""}{entry.name}
+                                    {isActive && (
+                                        <span style={{
+                                            marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 10,
+                                            background: "#105c5c", color: "#fff", textTransform: "uppercase"
+                                        }}>active</span>
+                                    )}
+                                </Heading>
+                                <Paragraph style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>
+                                    {new Date(entry.updatedAt).toLocaleString()}
+                                    {entry.source ? ` · from ${entry.source}` : ""}
+                                    {entry.note ? ` · ${entry.note}` : ""}
+                                </Paragraph>
+                            </div>
+                            <div style={row}>
+                                <Button size="small" disabled={busy || isActive}
+                                    onClick={run(() => switchProfile(entry.name), `Switched to "${entry.name}". Ctrl+R to apply everything.`)}>
+                                    Switch
+                                </Button>
+                                <Button size="small" variant="secondary" disabled={busy}
+                                    onClick={run(() => upsertProfile({ ...entry, favorite: !entry.favorite }))}>
+                                    {entry.favorite ? "★" : "☆"}
+                                </Button>
+                                {!compact && <Button size="small" variant="secondary" onClick={() => exportEntry(entry)}>Export</Button>}
+                                {!compact && (
+                                    <Button size="small" variant="dangerSecondary" disabled={busy}
+                                        onClick={run(() => deleteProfile(entry.name), `Deleted "${entry.name}"`)}>
+                                        Delete
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+/** Save-current form + import, reused by Szmelc HQ. */
+export function ProfileSaveBar() {
     const [name, setName] = useState("");
     const [note, setNote] = useState("");
     const [busy, setBusy] = useState(false);
+    const fileRef = React.useRef<HTMLInputElement>(null);
 
-    const refresh = async () => setVault(await loadVault());
-    useEffect(() => { refresh(); }, []);
-
-    const saveAs = async (favorite = false) => {
+    const save = async (favorite: boolean) => {
         const n = name.trim();
-        if (!n) {
-            showToast({ text: "Name required", variant: "critical" });
-            return;
-        }
+        if (!n) return showToast({ text: "Name required", variant: "critical" });
         setBusy(true);
         try {
-            const v = await loadVault();
-            const payload = await snapshotCurrent();
-            const existing = v.entries.find(e => e.name === n);
-            if (existing) {
-                existing.payload = payload;
-                existing.updatedAt = Date.now();
-                existing.note = note || existing.note;
-                if (favorite) existing.favorite = true;
-            } else {
-                v.entries.push({
-                    name: n,
-                    favorite,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    note,
-                    payload
-                });
-            }
-            await saveVault(v);
+            await upsertProfile({ name: n, note: note || undefined, favorite: favorite || undefined, payload: await snapshotCurrent() });
             setName("");
             setNote("");
-            await refresh();
             showToast({ text: `Saved profile "${n}"`, variant: "success" });
         } catch (e) {
             showToast({ text: String(e), variant: "critical" });
@@ -102,94 +158,48 @@ function VaultPanel() {
         }
     };
 
-    const activate = async (entry: VaultEntry) => {
-        setBusy(true);
-        try {
-            await applyPayload(entry.payload);
-            showToast({
-                text: `Applied "${entry.name}". Restart / reload (Ctrl+R) for full effect.`,
-                variant: "success"
-            });
-        } catch (e) {
-            showToast({ text: String(e), variant: "critical" });
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    const toggleFav = async (entry: VaultEntry) => {
-        const v = await loadVault();
-        const e = v.entries.find(x => x.name === entry.name);
-        if (!e) return;
-        e.favorite = !e.favorite;
-        await saveVault(v);
-        await refresh();
-    };
-
-    const remove = async (entry: VaultEntry) => {
-        const v = await loadVault();
-        v.entries = v.entries.filter(x => x.name !== entry.name);
-        await saveVault(v);
-        await refresh();
-        showToast({ text: `Deleted "${entry.name}"`, variant: "default" });
-    };
-
-    const exportOne = async (entry: VaultEntry) => {
-        const blob = new Blob([JSON.stringify(entry, null, 2)], { type: "application/json" });
-        const file = new File([blob], `sernicord-profile-${entry.name}.json`, { type: "application/json" });
-        if (IS_DISCORD_DESKTOP) {
-            const data = new TextEncoder().encode(JSON.stringify(entry, null, 2));
-            DiscordNative.fileManager.saveWithDialog(data, file.name);
-        } else {
-            const { saveFile } = await import("@utils/web");
-            saveFile(file);
-        }
-    };
-
-    const sorted = [...vault.entries].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite) || b.updatedAt - a.updatedAt);
-
     return (
-        <div>
-            <Paragraph style={{ marginBottom: 8 }}>
-                Snapshots include plugin enablement, plugin settings, themes, theme links, and QuickCSS.
-                Profiles stay in local DataStore (not cloud). Reload Discord after switching.
-            </Paragraph>
-            <TextInput placeholder="Profile name" value={name} onChange={setName} />
-            <div style={{ height: 8 }} />
-            <TextInput placeholder="Optional note" value={note} onChange={setNote} />
-            <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 16 }}>
-                <Button disabled={busy} onClick={() => saveAs(false)}>Save / Update</Button>
-                <Button variant="positive" disabled={busy} onClick={() => saveAs(true)}>Save as Favorite</Button>
+        <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <TextInput placeholder="Profile name" value={name} onChange={setName} />
+                <TextInput placeholder="Optional note" value={note} onChange={setNote} />
             </div>
-            {sorted.length === 0 && <Paragraph>No profiles yet.</Paragraph>}
-            {sorted.map(entry => (
-                <div
-                    key={entry.name}
-                    style={{
-                        padding: 10,
-                        marginBottom: 8,
-                        borderRadius: 8,
-                        background: "var(--background-secondary)",
-                        border: entry.favorite ? "1px solid var(--status-positive)" : "1px solid transparent"
+            <div style={row}>
+                <Button size="small" disabled={busy} onClick={() => save(false)}>Save current</Button>
+                <Button size="small" variant="positive" disabled={busy} onClick={() => save(true)}>Save as ★</Button>
+                <Button size="small" variant="secondary" onClick={() => fileRef.current?.click()}>Import .json</Button>
+                <input
+                    ref={fileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    style={{ display: "none" }}
+                    onChange={async e => {
+                        const input = e.currentTarget;
+                        const f = input.files?.[0];
+                        input.value = "";
+                        if (!f) return;
+                        try {
+                            showToast({ text: `Imported "${await importEntryFile(f)}"`, variant: "success" });
+                        } catch (err) {
+                            showToast({ text: String((err as Error)?.message ?? err), variant: "critical" });
+                        }
                     }}
-                >
-                    <Heading tag="h5" style={{ margin: 0 }}>
-                        {entry.favorite ? "★ " : ""}{entry.name}
-                    </Heading>
-                    <Paragraph style={{ fontSize: 12, opacity: 0.75 }}>
-                        updated {new Date(entry.updatedAt).toLocaleString()}
-                        {entry.note ? ` — ${entry.note}` : ""}
-                    </Paragraph>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                        <Button size="small" disabled={busy} onClick={() => activate(entry)}>Switch</Button>
-                        <Button size="small" variant="secondary" onClick={() => toggleFav(entry)}>
-                            {entry.favorite ? "Unfavorite" : "Favorite"}
-                        </Button>
-                        <Button size="small" variant="secondary" onClick={() => exportOne(entry)}>Export</Button>
-                        <Button variant="dangerSecondary" size="small" onClick={() => remove(entry)}>Delete</Button>
-                    </div>
-                </div>
-            ))}
+                />
+            </div>
+        </div>
+    );
+}
+
+function VaultPanel() {
+    return (
+        <div style={{ display: "grid", gap: 12 }}>
+            <Paragraph>
+                Snapshots include plugin enablement, plugin settings, themes, theme links, and QuickCSS.
+                Profiles stay in local DataStore (not cloud). Switching saves the current state into the
+                active profile first, so you can always switch back. Reload Discord after switching.
+            </Paragraph>
+            <ProfileSaveBar />
+            <ProfileList />
         </div>
     );
 }
@@ -203,7 +213,7 @@ export const settings = definePluginSettings({
 
 export default definePlugin({
     name: "ProfileVault",
-    description: "Save Vencord/Sernicord config, plugins, themes, and QuickCSS as named favorites and switch between them.",
+    description: "Save Vencord/Sernicord config, plugins, themes, and QuickCSS as named favorites and switch between them (also from the szmelc tab).",
     authors: [Author],
     tags: ["Utility", "Customisation", "Organisation"],
     settings

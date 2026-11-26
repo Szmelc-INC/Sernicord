@@ -18,7 +18,8 @@ Bundled plugins:
 | `localArchive` | Local channel/DM/server archive tooling |
 | `secureChat` | Shared-passphrase AES-GCM encrypt/decrypt + blacklist |
 | `omniSearch` | One field across servers/channels/friends/messages/plugins/settings |
-| `profileVault` | Save/favorite/switch settings+plugins+themes profiles |
+| `profileVault` | Save/favorite/switch settings+plugins+themes profiles; switching keeps the previous state in the active profile; JSON import/export; shared store (`profileVault/store.ts`) used by InstanceScout and the szmelc tab |
+| `instanceScout` | With your permission, finds other Discord / Vencord / Equicord / Vesktop / BetterDiscord / Sernicord installs (incl. Flatpak/Snap, Sernicord `data/**` profiles, extra folders you add). Browse settings.json, enabled plugins, themes (with source view), QuickCSS, BD plugins + custom.css; import plugin sets (enable / mirror, with settings), themes, theme links, QuickCSS / custom.css (append / replace), or turn an install into a new switchable profile. Read-only towards other installs; login data only via `./sernicord scan --import cache` |
 | `botLens` | Browse as a **bot** via API GUI (does not swap your user login) |
 | `embedForge` | Webhook embeds / link buttons / markdown cards (`/embed`) |
 | `secretSentinel` | Local-only watcher for tokens/keys/emails + custom patterns |
