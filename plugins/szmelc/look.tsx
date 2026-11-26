@@ -69,25 +69,6 @@ const OG_CSS = `
 .vc-szmelc-og [class*="blobContainer"][class*="selected"] svg { fill: #7fffd4; }
 `;
 
-export const BADGE_CSS = `
-.vc-szmelc-badge {
-    position: fixed;
-    left: 8px;
-    bottom: 8px;
-    z-index: 9999;
-    background: #105c5c;
-    color: #ffffff;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    padding: 3px 10px;
-    border-radius: 4px;
-    opacity: 0.9;
-    pointer-events: none;
-    text-transform: uppercase;
-    box-shadow: 0 0 0 1px rgba(127, 255, 212, 0.25);
-}
-`;
 
 export function SzmelcIcon({ width = 24, height = 24, className }: IconProps) {
     return (

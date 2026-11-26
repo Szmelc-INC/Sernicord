@@ -1,0 +1,218 @@
+/*
+ * Sernicord UI kit: shared look for every Sernicord panel and modal (same language as Szmelc HQ).
+ * Szmelc palette: accent #105c5c (text/links #1f8a8a), danger #750f0f (#b83a3a), silver #c0c0c0,
+ * aquamarine #7fffd4 for rare highlights, neutral greys otherwise. Backgrounds follow the
+ * active Discord theme so panels never clash with it.
+ */
+
+:root {
+    --sx-accent: #105c5c;
+    --sx-accent-text: #1f8a8a;
+    --sx-danger: #750f0f;
+    --sx-danger-text: #b83a3a;
+    --sx-silver: #c0c0c0;
+    --sx-aqua: #7fffd4;
+    --sx-line: var(--background-modifier-accent, #262626);
+    --sx-surface: var(--background-secondary, #1b1b1b);
+    --sx-sunken: var(--background-tertiary, #0b0b0b);
+}
+
+.vc-sx {
+    color: var(--text-normal);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.vc-sx * { box-sizing: border-box; }
+.vc-sx-pad { padding: 4px 0 12px; }
+
+/* layout */
+.vc-sx-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vc-sx-row.between { justify-content: space-between; }
+.vc-sx-row.nowrap { flex-wrap: nowrap; }
+.vc-sx-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vc-sx-col.tight { gap: 4px; }
+.vc-sx-grow { flex: 1; min-width: 0; }
+.vc-sx-spacer { flex: 1; }
+.vc-sx-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(var(--sx-min, 220px), 1fr)); }
+.vc-sx-scroll { max-height: var(--sx-max, 340px); overflow: auto; padding-right: 2px; }
+
+/* surfaces */
+.vc-sx-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-line);
+    min-width: 0;
+}
+.vc-sx-card.compact { padding: 8px 10px; gap: 6px; }
+.vc-sx-card.active { border-color: var(--sx-accent-text); }
+.vc-sx-card.danger { border-color: var(--sx-danger); }
+.vc-sx-card.dim { opacity: .55; }
+.vc-sx-card > h4, .vc-sx-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--header-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.vc-sx-section {
+    margin: 4px 0 0;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--sx-silver);
+}
+.vc-sx-divider { border: 0; border-top: 1px solid var(--sx-line); margin: 2px 0; }
+
+/* text */
+.vc-sx-muted { color: var(--text-muted); font-size: 12px; }
+.vc-sx-hint { color: var(--text-muted); font-size: 13px; margin: 0; }
+.vc-sx-mono { font-family: var(--font-code); font-size: 12px; overflow-wrap: anywhere; }
+.vc-sx-err { color: var(--sx-danger-text); font-size: 13px; }
+.vc-sx-ok { color: var(--sx-accent-text); }
+.vc-sx-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vc-sx-pre { white-space: pre-wrap; word-break: break-word; user-select: text; }
+.vc-sx-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    border: 1px dashed var(--sx-line);
+    border-radius: 8px;
+}
+
+/* pills */
+.vc-sx-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    background: #262626;
+    color: var(--sx-silver);
+    line-height: 16px;
+}
+.vc-sx-pill.accent { background: var(--sx-accent); color: #fff; }
+.vc-sx-pill.danger { background: var(--sx-danger); color: #fff; }
+.vc-sx-pill.aqua { background: var(--sx-aqua); color: #000; }
+.vc-sx-pill.outline { background: transparent; border: 1px solid var(--sx-line); }
+.vc-sx-pills { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* segmented tabs */
+.vc-sx-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-bottom: 1px solid var(--sx-line);
+    padding-bottom: 6px;
+}
+.vc-sx-tabs.inline { border: 1px solid var(--sx-line); border-radius: 8px; padding: 2px; gap: 2px; }
+.vc-sx-tab {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 11px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.vc-sx-tabs.inline .vc-sx-tab { padding: 4px 9px; font-size: 12px; }
+.vc-sx-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.vc-sx-tab[aria-selected="true"] { background: var(--sx-accent); color: #fff; }
+.vc-sx-tab .n { margin-left: 5px; font-size: 11px; font-weight: 600; opacity: .8; }
+
+/* checkbox row */
+.vc-sx-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    min-width: 0;
+}
+.vc-sx-check:hover { background: var(--background-modifier-hover); }
+.vc-sx-check.disabled { cursor: default; opacity: .5; }
+.vc-sx-check.disabled:hover { background: transparent; }
+.vc-sx-check input { accent-color: var(--sx-accent-text); width: 16px; height: 16px; margin: 0; flex: none; }
+
+/* toggle row (Switch + label) */
+.vc-sx-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-normal); }
+
+/* list rows (selectable lists) */
+.vc-sx-list { display: flex; flex-direction: column; gap: 2px; }
+.vc-sx-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: var(--text-normal);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    min-width: 0;
+}
+.vc-sx-item:hover { background: var(--background-modifier-hover); }
+.vc-sx-item[aria-selected="true"] { background: var(--sx-accent); color: #fff; }
+.vc-sx-item[aria-selected="true"] .vc-sx-muted { color: #e0e0e0; }
+
+/* panes */
+.vc-sx-pane {
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-line);
+    border-radius: 8px;
+    padding: 6px;
+    min-height: 0;
+}
+
+/* code / previews */
+.vc-sx-code {
+    margin: 0;
+    padding: 10px;
+    border-radius: 6px;
+    background: var(--sx-sunken);
+    color: #dcdddd;
+    border: 1px solid var(--sx-line);
+    font-family: var(--font-code);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    user-select: text;
+}
+.vc-sx-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: var(--sx-sunken);
+    flex: none;
+}
+
+.vc-sx mark.vc-sx-hit { background: var(--sx-danger); color: #fff; border-radius: 3px; padding: 0 2px; }
+
+.vc-sx button:focus-visible, .vc-sx input:focus-visible, .vc-sx [tabindex]:focus-visible {
+    outline: 2px solid var(--sx-aqua);
+    outline-offset: 2px;
+}

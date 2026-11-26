@@ -18,7 +18,8 @@ import { Menu, React, showToast } from "@webpack/common";
 
 import { addFromUrl, api, currentChannel, errText, hasNative, limitFor, MediaItem, mediaOfMessage, RemoteMedia, runJob, uploadToChannel } from "./client";
 import { humanBytes, Target } from "./planner";
-import { openInPaint, openOversize, openStudio, shrinkFiles, STUDIO_CSS, useTools } from "./ui";
+import managedStyle from "./styles.css?managed";
+import { openInPaint, openOversize, openStudio, shrinkFiles, useTools } from "./ui";
 
 const Author = { name: "sernik", id: 0n };
 
@@ -290,7 +291,7 @@ export default definePlugin({
     authors: [Author],
     tags: ["Media", "Utility", "Chat"],
     settings,
-    managedStyle: STUDIO_CSS,
+    managedStyle,
 
     contextMenus: {
         "message": messageMenu,
