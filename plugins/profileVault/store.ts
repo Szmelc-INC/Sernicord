@@ -63,11 +63,29 @@ export async function snapshotCurrent(): Promise<VaultEntry["payload"]> {
     return { settings, quickCss };
 }
 
+/** Plugins that must survive any profile switch, or the user loses the way back. */
+const KEEP_ON = ["ProfileVault", "Szmelc"];
+
+/**
+ * Apply a profile. Plugins the profile does not mention keep their current state (a profile made
+ * from another install knows nothing about Sernicord's plugins), and the switcher itself stays on.
+ */
+export function mergeForApply(current: any, incoming: any) {
+    const merged = { ...incoming, plugins: { ...(incoming?.plugins ?? {}) } };
+    for (const [name, entry] of Object.entries<any>(current?.plugins ?? {})) {
+        if (!(name in merged.plugins)) merged.plugins[name] = entry;
+    }
+    for (const name of KEEP_ON) merged.plugins[name] = { ...(merged.plugins[name] ?? {}), enabled: true };
+    return merged;
+}
+
 export async function applyPayload(payload: VaultEntry["payload"]) {
     if (!payload?.settings || typeof payload.settings !== "object") throw new Error("Invalid profile payload");
-    Object.assign(PlainSettings, payload.settings);
+    const current = typeof VencordNative !== "undefined" ? VencordNative.settings.get() : structuredClone(PlainSettings);
+    const settings = mergeForApply(current, payload.settings);
+    Object.assign(PlainSettings, settings);
     if (typeof VencordNative !== "undefined") {
-        await VencordNative.settings.set(payload.settings);
+        await VencordNative.settings.set(settings);
         await VencordNative.quickCss.set(payload.quickCss ?? "");
     }
 }
@@ -93,24 +111,24 @@ export async function uniqueProfileName(base: string) {
     for (let i = 2; ; i++) if (!names.has(`${base} (${i})`)) return `${base} (${i})`;
 }
 
+export const AUTOSAVE = "Autosave";
+
 /**
- * Switch to a profile. Before switching, the current state is saved into the
- * profile that was active (or "Autosave" if none), so switching back is lossless.
+ * Switch to a profile. The state before the switch always goes to "Autosave" (never into a
+ * named profile, so a curated profile is only changed when you save it yourself).
  */
 export async function switchProfile(name: string) {
     const v = await loadVault();
     const target = v.entries.find(e => e.name === name);
     if (!target) throw new Error(`No profile "${name}"`);
-    const prev = await getActiveProfile();
-    const keepAs = prev && prev !== name && v.entries.some(e => e.name === prev) ? prev : "Autosave";
-    if (keepAs !== name) {
+    if (name !== AUTOSAVE) {
         const payload = await snapshotCurrent();
-        const keep = v.entries.find(e => e.name === keepAs);
+        const keep = v.entries.find(e => e.name === AUTOSAVE);
         if (keep) {
             keep.payload = payload;
             keep.updatedAt = Date.now();
         } else {
-            v.entries.push({ name: keepAs, createdAt: Date.now(), updatedAt: Date.now(), note: "state before the last switch", payload });
+            v.entries.push({ name: AUTOSAVE, createdAt: Date.now(), updatedAt: Date.now(), note: "state before the last switch", payload });
         }
         await saveVault(v);
     }

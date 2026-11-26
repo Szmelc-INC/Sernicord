@@ -108,13 +108,14 @@ function chatChannelId() {
     return ch.id;
 }
 
-function intercept(files: File[], e: Event) {
+/** Returns true when MediaForge took over the files. */
+function intercept(files: File[], e: Event): boolean {
     const mode = settings.store.oversize;
-    if (mode === "off" || !files.length || !hasNative()) return;
+    if (mode === "off" || !files.length || !hasNative()) return false;
     const channelId = chatChannelId();
-    if (!channelId) return;
+    if (!channelId) return false;
     const limit = limitFor(channelId, settings.store.uploadLimitMB);
-    if (!files.some(f => f.size > limit)) return;
+    if (!files.some(f => f.size > limit)) return false;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (mode === "auto") {
@@ -127,6 +128,7 @@ function intercept(files: File[], e: Event) {
     } else {
         openOversize(files, channelId, limit, settings.store.splitIfNeeded);
     }
+    return true;
 }
 
 function insideOurUi(t: EventTarget | null) {
@@ -154,9 +156,8 @@ const onChange = (e: Event) => {
     if (!(t instanceof HTMLInputElement) || t.type !== "file" || !t.multiple || insideOurUi(t)) return;
     const files = [...(t.files ?? [])];
     if (!files.length) return;
-    const before = files.length;
-    intercept(files, e);
-    if (e.defaultPrevented && before) t.value = "";
+    // change events can't be cancelled; clear the input so picking the same file again fires again
+    if (intercept(files, e)) t.value = "";
 };
 
 /* ---------------- context menus ---------------- */
